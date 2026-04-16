@@ -359,16 +359,15 @@
                 if (game.state === GameState.PLAYING && game.player) {
                     const screenW = window.innerWidth;
                     const gazeRatioX = eyeTracking.smoothX / screenW;
-                    let turnSpeed = 0;
+                    if (typeof game.player.eyeAimX !== 'number') game.player.eyeAimX = game.player.position.x;
                     if (gazeRatioX < 0.35) {
-                        turnSpeed = -1.2 * ((0.35 - gazeRatioX) / 0.35);
+                        game.player.eyeAimX -= 16 * ((0.35 - gazeRatioX) / 0.35);
                     } else if (gazeRatioX > 0.65) {
-                        turnSpeed = 1.2 * ((gazeRatioX - 0.65) / 0.35);
+                        game.player.eyeAimX += 16 * ((gazeRatioX - 0.65) / 0.35);
                     }
-                    const currentAimX = game.player.position.x + Math.cos(game.player.aimAngle) * 200;
-                    const currentAimY = game.player.position.y + Math.sin(game.player.aimAngle) * 200;
-                    const newAimX = currentAimX + turnSpeed * 18;
-                    game.player.aimAt(newAimX, currentAimY);
+                    const maxOffset = 600;
+                    game.player.eyeAimX = Math.max(game.player.position.x - maxOffset, Math.min(game.player.position.x + maxOffset, game.player.eyeAimX));
+                    game.player.aimAt(game.player.eyeAimX, game.player.position.y);
                 }
             } else if (input.hasTouch) {
                 input.mode = 'touch';
@@ -1149,6 +1148,6 @@
         <div class="calibration-instruction" id="calibrationInstruction">请用眼睛注视屏幕上的圆点，并用手指点击它</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-c265523-min-diag</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-aim-cross-v3</div>
 </body>
 </html>
