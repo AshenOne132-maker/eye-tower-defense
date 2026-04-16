@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>眼动塔防 - Eye Tower Defense</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>眼动塔防 v3 - Eye Tower Defense</title>
     <script src="https://cdn.jsdelivr.net/npm/webgazer@3.0.0/webgazer.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
@@ -765,21 +768,23 @@
             game.canvas = document.getElementById('gameCanvas'); game.ctx = game.canvas.getContext('2d');
             resizeCanvas(); window.addEventListener('resize', resizeCanvas);
             bindEvents(); bindInputEvents(); requestAnimationFrame(gameLoop);
+            console.log('[EyeTowerDefense] Version 2026-04-16-v3 loaded');
             setTimeout(() => { initEyeTracking(); }, 500);
         }
 
         function initEyeTracking() {
             const statusEl = document.getElementById('permissionStatus');
             const overlay = document.getElementById('permissionOverlay');
+            overlay.classList.remove('hidden');
             if (!eyeTracking.checkAvailable()) {
                 statusEl.innerHTML = '眼动追踪库未加载<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
-                setTimeout(() => { overlay.classList.add('hidden'); }, 1500); return;
+                setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 statusEl.innerHTML = '当前浏览器不支持摄像头<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
-                setTimeout(() => { overlay.classList.add('hidden'); }, 1500); return;
+                setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
-            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏重新允许</small>'; overlay.classList.remove('hidden'); eyeTracking.init();
+            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏重新允许</small>'; eyeTracking.init();
         }
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
