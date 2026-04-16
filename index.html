@@ -246,11 +246,13 @@
                 if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
                 this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 1;
                 this.calibrationPositions = [
-                    {x: 10, y: 10}, {x: 90, y: 10}, {x: 50, y: 50}, {x: 10, y: 90}, {x: 90, y: 90}
+                    {x: 20, y: 20}, {x: 80, y: 20}, {x: 50, y: 50}, {x: 20, y: 80}, {x: 80, y: 80}
                 ];
                 if (typeof webgazer !== 'undefined') {
                     try { webgazer.showVideo(false); webgazer.showFaceOverlay(false); webgazer.showFaceFeedbackBox(false); } catch(e){}
                 }
+                const wgContainer = document.getElementById('webgazerVideoContainer');
+                if (wgContainer) wgContainer.style.display = 'none';
                 const overlay = document.getElementById('calibrationOverlay');
                 overlay.classList.remove('hidden');
                 this.createProgressDots();
@@ -321,6 +323,8 @@
                 if (typeof webgazer !== 'undefined') {
                     try { webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true); } catch(e){}
                 }
+                const wgContainer2 = document.getElementById('webgazerVideoContainer');
+                if (wgContainer2) wgContainer2.style.display = 'block';
                 this.styleVideoPreview();
                 this.ready = true;
                 updateEyeStatus(true); updateControlToggle();
@@ -369,15 +373,20 @@
                 if (game.state === GameState.PLAYING && game.player) {
                     const screenW = window.innerWidth;
                     const gazeRatioX = eyeTracking.smoothX / screenW;
-                    let targetOffsetX = 0;
-                    if (gazeRatioX < 0.4) {
-                        targetOffsetX = -((0.4 - gazeRatioX) / 0.4) * 700;
-                    } else if (gazeRatioX > 0.6) {
-                        targetOffsetX = ((gazeRatioX - 0.6) / 0.4) * 700;
+                    let targetX = game.player.position.x;
+                    const bounds = camera.getWorldBounds();
+                    const enemies = game.entities.filter(e => (e instanceof Enemy || e instanceof Boss) && e.state !== 'die');
+                    if (gazeRatioX < 0.45) {
+                        const leftEnemies = enemies.filter(e => e.position.x < game.player.position.x).sort((a,b) => b.position.x - a.position.x);
+                        if (leftEnemies.length > 0) targetX = leftEnemies[0].position.x;
+                        else targetX = bounds.left + 50;
+                    } else if (gazeRatioX > 0.55) {
+                        const rightEnemies = enemies.filter(e => e.position.x >= game.player.position.x).sort((a,b) => a.position.x - b.position.x);
+                        if (rightEnemies.length > 0) targetX = rightEnemies[0].position.x;
+                        else targetX = bounds.right - 50;
                     }
                     if (typeof game.player.eyeAimX !== 'number') game.player.eyeAimX = game.player.position.x;
-                    const targetAimX = game.player.position.x + targetOffsetX;
-                    game.player.eyeAimX += (targetAimX - game.player.eyeAimX) * 0.18;
+                    game.player.eyeAimX += (targetX - game.player.eyeAimX) * 0.22;
                     game.player.aimAt(game.player.eyeAimX, game.player.position.y);
                 }
             } else if (input.hasTouch) {
@@ -1159,6 +1168,6 @@
         <div class="calibration-instruction" id="calibrationInstruction">请用眼睛注视屏幕上的圆点，并用手指点击它</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-spring-aim-5pt-v1</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-lockon-5pt-v2</div>
 </body>
 </html>
