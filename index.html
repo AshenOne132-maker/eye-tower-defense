@@ -167,9 +167,21 @@
             async start() {
                 if (!this.initialized) return false;
                 try {
+                    showToast('正在加载眼动追踪模型...');
                     await webgazer.begin(); this.ready = true; this.active = true;
                     this.styleVideoPreview(); updateEyeStatus(true); updateControlToggle(); showToast('眼动追踪已启动'); return true;
-                } catch (e) { console.error(e); this.ready = false; updateEyeStatus(false); return false; }
+                } catch (e) { 
+                    console.error(e); 
+                    this.ready = false; this.active = false; updateEyeStatus(false); updateControlToggle();
+                    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+                        showToast('摄像头权限被拒绝，请在地址栏左侧允许权限后刷新');
+                    } else if (e.name === 'NotFoundError') {
+                        showToast('未找到摄像头设备');
+                    } else {
+                        showToast('眼动模型加载失败，请检查网络');
+                    }
+                    return false; 
+                }
             },
             stop() {
                 if (typeof webgazer !== 'undefined') webgazer.end();
@@ -763,7 +775,11 @@
                 statusEl.innerHTML = '眼动追踪库未加载<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
                 setTimeout(() => { overlay.classList.add('hidden'); }, 1500); return;
             }
-            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头'; overlay.classList.remove('hidden'); eyeTracking.init();
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.innerHTML = '当前浏览器不支持摄像头<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
+                setTimeout(() => { overlay.classList.add('hidden'); }, 1500); return;
+            }
+            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏重新允许</small>'; overlay.classList.remove('hidden'); eyeTracking.init();
         }
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
