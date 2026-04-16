@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>鐪煎姩濉旈槻 v3 - Eye Tower Defense</title>
+    <title>眼动塔防 v3 - Eye Tower Defense</title>
     <script src="https://cdn.jsdelivr.net/npm/webgazer@3.0.0/webgazer.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
@@ -54,39 +54,40 @@
 <body>
     <canvas id="gameCanvas"></canvas>
     <div id="mainMenu" class="menu-screen">
-        <div class="game-title">馃憗锔?鐪煎姩濉旈槻 v3</div>
-        <div style="color: rgba(255,255,255,0.6); margin-bottom: 30px; text-align: center;">绔栧睆娓哥帺 路 鍙樿韩婵€鍏?路 鐙楀ごBoss 路 鍔犺閬撳叿</div>
-        <button class="btn" id="startBtn">寮€濮嬫父鎴?/button>
+        <div class="game-title">👁️ 眼动塔防 v3</div>
+        <div style="color: rgba(255,255,255,0.6); margin-bottom: 30px; text-align: center;">竖屏游玩 · 变身激光 · 狗头Boss · 加血道具</div>
+        <button class="btn" id="startBtn">开始游戏</button>
     </div>
     <div id="hud" class="hud" style="display: none;">
         <div class="hud-item">
-            <span>鉂わ笍</span>
+            <span>❤️</span>
             <div class="health-bar"><div class="health-fill" id="healthFill" style="width: 100%;"></div></div>
         </div>
         <div class="hud-item">
-            <span>鈿?/span>
+            <span>⚡</span>
             <div class="energy-bar"><div class="energy-fill" id="energyFill" style="width: 0%;"></div></div>
         </div>
-        <div class="hud-item"><span>馃弳</span><span id="scoreDisplay">0</span></div>
-        <div class="hud-item"><span>馃寠</span><span id="waveDisplay">1</span></div>
+        <div class="hud-item"><span>🏆</span><span id="scoreDisplay">0</span></div>
+        <div class="hud-item"><span>🌊</span><span id="waveDisplay">1</span></div>
     </div>
     <div id="gameOver" class="game-over">
-        <div class="game-title">娓告垙缁撴潫</div>
-        <div style="font-size: 24px; color: #ffd700; margin: 15px 0;">鏈€缁堝緱鍒? <span id="finalScore">0</span></div>
-        <button class="btn" id="restartBtn">閲嶆柊寮€濮?/button>
-        <button class="btn" id="menuBtn" style="background: linear-gradient(135deg, #4a90d9, #357abd); margin-top: 10px;">杩斿洖鑿滃崟</button>
+        <div class="game-title">游戏结束</div>
+        <div style="font-size: 24px; color: #ffd700; margin: 15px 0;">最终得分: <span id="finalScore">0</span></div>
+        <button class="btn" id="restartBtn">重新开始</button>
+        <button class="btn" id="menuBtn" style="background: linear-gradient(135deg, #4a90d9, #357abd); margin-top: 10px;">返回菜单</button>
     </div>
     <div id="permissionOverlay" class="permission-overlay hidden">
-        <div class="permission-icon">馃摲</div>
-        <div class="permission-title">鍚敤鐪煎姩杩借釜</div>
+        <div class="permission-icon">📷</div>
+        <div class="permission-title">启用眼动追踪</div>
         <div class="permission-text">
-            鎴戜滑闇€瑕佽闂憚鍍忓ご鏉ュ疄鐜扮溂鍔ㄧ瀯鍑嗐€?br>瑙嗛浠呭湪鏈湴澶勭悊锛屼笉浼氫笂浼犮€?br>鎮ㄤ篃鍙互鎷掔粷锛屾敼鐢ㄨЕ鎽告垨榧犳爣鎺у埗銆?        </div>
-        <button class="btn" id="allowCameraBtn">鍏佽璁块棶</button>
-        <button class="btn" id="denyCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563);">浣跨敤瑙︽懜/榧犳爣</button>
-        <div class="permission-status" id="permissionStatus">姝ｅ湪鍒濆鍖栫溂鍔ㄨ拷韪?..</div>
+            我们需要访问摄像头来实现眼动瞄准。<br>视频仅在本地处理，不会上传。<br>您也可以拒绝，改用触摸或鼠标控制。
+        </div>
+        <button class="btn" id="allowCameraBtn">允许访问</button>
+        <button class="btn" id="denyCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563);">使用触摸/鼠标</button>
+        <div class="permission-status" id="permissionStatus">正在初始化眼动追踪...</div>
     </div>
     <div id="eyeStatus" class="eye-status"></div>
-    <div id="controlToggle" class="control-toggle" style="display:none;">鎺у埗: 鑷姩</div>
+    <div id="controlToggle" class="control-toggle" style="display:none;">控制: 自动</div>
     <div id="toast" class="toast"></div>
 
     <script>
@@ -132,7 +133,8 @@
             update(target) {
                 if (target) {
                     this.x = target.position.x;
-                    // 璁╁湴闈㈠湪瑙嗚涓婂浐瀹氫綅浜庡睆骞曢珮搴︾殑 2/3 澶勶紙璺濆簳杈?1/3锛?                    const desiredScreenGroundY = game.canvas.height * (2/3);
+                    // 让地面在视觉上固定位于屏幕高度的 2/3 处（距底边 1/3）
+                    const desiredScreenGroundY = game.canvas.height * (2/3);
                     this.y = game.groundY - (desiredScreenGroundY - game.canvas.height / 2) / this.zoom;
                 }
             },
@@ -320,8 +322,8 @@
             const el = document.getElementById('controlToggle');
             if (game.state !== GameState.PLAYING) { el.style.display = 'none'; return; }
             el.style.display = 'block';
-            const mode = eyeTracking.ready && eyeTracking.active ? '鐪煎姩' : (input.mode === 'touch' ? '瑙︽懜' : '榧犳爣');
-            el.textContent = '鎺у埗: ' + mode;
+            const mode = eyeTracking.ready && eyeTracking.active ? '眼动' : (input.mode === 'touch' ? '触摸' : '鼠标');
+            el.textContent = '控制: ' + mode;
         }
 
         class Entity {
@@ -616,7 +618,7 @@
                     this.nextKnockbackHealth -= CONFIG.BOSS_KNOCKBACK_THRESHOLD;
                     this.triggerKnockback();
                 }
-                if (this.health <= 0) { this.state = 'die'; game.score += 2000; showToast('馃帀 Boss 琚嚮璐ワ紒'); }
+                if (this.health <= 0) { this.state = 'die'; game.score += 2000; showToast('🎉 Boss 被击败！'); }
             }
             triggerKnockback() {
                 this.state = 'knockback'; const player = game.entities.find(e => e instanceof Player);
@@ -644,9 +646,9 @@
                 grad.addColorStop(0, '#A0522D'); grad.addColorStop(1, '#5D4037'); ctx.fillStyle = grad;
                 ctx.beginPath(); ctx.roundRect(-this.radius, -this.radius * 0.9, this.radius * 2, this.radius * 1.8, 14); ctx.fill();
                 ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3; ctx.stroke();
-                // 鑰虫湹
+                // 耳朵
                 ctx.fillStyle = '#5D4037'; ctx.beginPath(); ctx.moveTo(-25, -30); ctx.lineTo(-35, -55); ctx.lineTo(-12, -35); ctx.fill(); ctx.beginPath(); ctx.moveTo(25, -30); ctx.lineTo(35, -55); ctx.lineTo(12, -35); ctx.fill();
-                // 鐪肩潧
+                // 眼睛
                 let eyeColor, pupilColor, eyeY;
                 if (this.state === 'stun') { eyeColor = '#90a4ae'; pupilColor = '#37474f'; eyeY = 2; }
                 else if (this.state === 'knockback') { eyeColor = '#cfd8dc'; pupilColor = '#b71c1c'; eyeY = 1; }
@@ -666,10 +668,11 @@
                         ctx.beginPath(); ctx.moveTo(-22, -10); ctx.lineTo(-10, -6); ctx.moveTo(10, -6); ctx.lineTo(22, -10); ctx.stroke();
                     }
                 }
-                // 鍢?                if (this.state === 'stun') {
+                // 嘴
+                if (this.state === 'stun') {
                     ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 12, 8, 0, Math.PI, false); ctx.stroke();
                     ctx.fillStyle = '#ffd700'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
-                    ctx.fillText('鈽?, -30, -40); ctx.fillText('鈽?, 30, -45); ctx.fillText('鈽?, 0, -55);
+                    ctx.fillText('★', -30, -40); ctx.fillText('★', 30, -45); ctx.fillText('★', 0, -55);
                 } else if (this.state === 'knockback') {
                     ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3;
                     ctx.beginPath(); ctx.moveTo(-8, 12); ctx.quadraticCurveTo(0, 8, 8, 12); ctx.stroke();
@@ -681,7 +684,8 @@
                     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-8, 14); ctx.lineTo(-4, 22); ctx.lineTo(0, 14); ctx.fill(); ctx.beginPath(); ctx.moveTo(0, 14); ctx.lineTo(4, 22); ctx.lineTo(8, 14); ctx.fill();
                     ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.ellipse(0, 2, 5, 4, 0, 0, Math.PI*2); ctx.fill();
                 }
-                // 琛€鏉?                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-30, -this.radius - 14, 60, 6);
+                // 血条
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-30, -this.radius - 14, 60, 6);
                 ctx.fillStyle = this.health > this.maxHealth * 0.5 ? '#4ade80' : this.health > this.maxHealth * 0.25 ? '#fbbf24' : '#ef4444';
                 ctx.fillRect(-30, -this.radius - 14, 60 * (this.health / this.maxHealth), 6);
                 ctx.restore();
@@ -698,7 +702,7 @@
             }
             aimAt(x, y) { this.aimAngle = Math.atan2(y - this.position.y, x - this.position.x); }
             gainEnergy(amount) { if (this.isTransformed) return; this.energy = Math.min(this.maxEnergy, this.energy + amount); if (this.energy >= this.maxEnergy) this.activateTransform(); }
-            activateTransform() { this.isTransformed = true; this.radius = 45; showToast('馃敟 鍙樿韩锛佽秴绾фí鎵縺鍏夛紒'); }
+            activateTransform() { this.isTransformed = true; this.radius = 45; showToast('🔥 变身！超级横扫激光！'); }
             deactivateTransform() { this.isTransformed = false; this.energy = 0; this.radius = 30; }
             findInteractablesOnRay() {
                 const bounds = camera.getWorldBounds();
@@ -796,10 +800,11 @@
                     const pulse = 0.6 + Math.sin(Date.now() * 0.01) * 0.4;
                     ctx.fillStyle = `rgba(255, 182, 193, ${0.2 * pulse})`;
                     ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius + 10 + pulse * 5, 0, Math.PI*2); ctx.fill();
-                    // 澶撮《灏忕埍蹇?                    if (Math.floor(Date.now() / 200) % 2 === 0) {
+                    // 头顶小爱心
+                    if (Math.floor(Date.now() / 200) % 2 === 0) {
                         ctx.fillStyle = '#ff69b4'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
-                        ctx.fillText('鈾?, this.position.x - 18, this.position.y - this.radius - 5);
-                        ctx.fillText('鈾?, this.position.x + 18, this.position.y - this.radius - 8);
+                        ctx.fillText('♥', this.position.x - 18, this.position.y - this.radius - 5);
+                        ctx.fillText('♥', this.position.x + 18, this.position.y - this.radius - 8);
                     }
                 }
                 ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -820,7 +825,7 @@
                         ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(this.position.x-10+eyeX, this.position.y-5+eyeY, 5, 0, Math.PI*2); ctx.arc(this.position.x+10+eyeX, this.position.y-5+eyeY, 5, 0, Math.PI*2); ctx.fill();
                         ctx.fillStyle = '#000000'; ctx.beginPath(); ctx.ellipse(this.position.x-10+eyeX, this.position.y-5+eyeY, 1.5, 5, 0, 0, Math.PI*2); ctx.ellipse(this.position.x+10+eyeX, this.position.y-5+eyeY, 1.5, 5, 0, 0, Math.PI*2); ctx.fill();
                     } else if (this.happyTimer > 0) {
-                        // 浜彈琛ㄦ儏锛氬集鐪肩瑧
+                        // 享受表情：弯眼笑
                         ctx.strokeStyle = '#374151'; ctx.lineWidth = 3;
                         ctx.beginPath(); ctx.arc(this.position.x-10, this.position.y-6, 5, 0, Math.PI, false); ctx.stroke();
                         ctx.beginPath(); ctx.arc(this.position.x+10, this.position.y-6, 5, 0, Math.PI, false); ctx.stroke();
@@ -836,7 +841,8 @@
                     ctx.fillStyle = '#7f1d1d'; ctx.beginPath(); ctx.arc(this.position.x, this.position.y + 8, 12, 0, Math.PI, false); ctx.fill();
                     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(this.position.x - 8, this.position.y + 8); ctx.lineTo(this.position.x - 4, this.position.y + 18); ctx.lineTo(this.position.x, this.position.y + 8); ctx.fill(); ctx.beginPath(); ctx.moveTo(this.position.x, this.position.y + 8); ctx.lineTo(this.position.x + 4, this.position.y + 18); ctx.lineTo(this.position.x + 8, this.position.y + 8); ctx.fill();
                 } else if (this.happyTimer > 0) {
-                    // 浜彈鍢达細澶у姬褰㈠井绗?                    ctx.strokeStyle = '#374151'; ctx.lineWidth = 2;
+                    // 享受嘴：大弧形微笑
+                    ctx.strokeStyle = '#374151'; ctx.lineWidth = 2;
                     ctx.beginPath(); ctx.arc(this.position.x, this.position.y + 10, 8, 0, Math.PI, false); ctx.stroke();
                 } else {
                     ctx.strokeStyle = '#374151'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(this.position.x - 5, this.position.y + 12); ctx.lineTo(this.position.x + 5, this.position.y + 12); ctx.stroke();
@@ -861,14 +867,14 @@
             const overlay = document.getElementById('permissionOverlay');
             overlay.classList.remove('hidden');
             if (!eyeTracking.checkAvailable()) {
-                statusEl.innerHTML = '鐪煎姩杩借釜搴撴湭鍔犺浇<br>灏嗕娇鐢ㄨЕ鎽?榧犳爣鎺у埗'; updateEyeStatus(false);
+                statusEl.innerHTML = '眼动追踪库未加载<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.innerHTML = '褰撳墠娴忚鍣ㄤ笉鏀寔鎽勫儚澶?br>灏嗕娇鐢ㄨЕ鎽?榧犳爣鎺у埗'; updateEyeStatus(false);
+                statusEl.innerHTML = '当前浏览器不支持摄像头<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
-            statusEl.innerHTML = '鐪煎姩杩借釜宸插氨缁?br>鐐瑰嚮"鍏佽璁块棶"鍚姩鎽勫儚澶?br><small style="color:#999">濡傛浘鎷掔粷鏉冮檺锛岃鍦ㄥ湴鍧€鏍忛噸鏂板厑璁?/small>'; eyeTracking.init();
+            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏重新允许</small>'; eyeTracking.init();
         }
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
@@ -885,20 +891,20 @@
             document.getElementById('allowCameraBtn').addEventListener('click', async () => {
                 const success = await eyeTracking.start();
                 document.getElementById('permissionOverlay').classList.add('hidden');
-                if (!success) showToast('鐪煎姩鍚姩澶辫触锛屽凡鍒囨崲瑙︽懜/榧犳爣');
+                if (!success) showToast('眼动启动失败，已切换触摸/鼠标');
             });
             document.getElementById('denyCameraBtn').addEventListener('click', () => {
-                eyeTracking.stop(); document.getElementById('permissionOverlay').classList.add('hidden'); showToast('宸插垏鎹㈠埌瑙︽懜/榧犳爣鎺у埗');
+                eyeTracking.stop(); document.getElementById('permissionOverlay').classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
             });
             document.getElementById('controlToggle').addEventListener('click', async () => {
                 if (eyeTracking.ready && eyeTracking.active) {
-                    eyeTracking.stop(); showToast('宸叉墜鍔ㄥ垏鎹负瑙︽懜/榧犳爣');
+                    eyeTracking.stop(); showToast('已手动切换为触摸/鼠标');
                 } else {
                     if (eyeTracking.checkAvailable()) {
-                        showToast('姝ｅ湪灏濊瘯鍚姩鐪煎姩...');
+                        showToast('正在尝试启动眼动...');
                         const ok = await eyeTracking.start();
-                        if (!ok) showToast('鐪煎姩鍚姩澶辫触锛岃妫€鏌ユ憚鍍忓ご鏉冮檺');
-                    } else { showToast('褰撳墠鐜涓嶆敮鎸佺溂鍔ㄨ拷韪?); }
+                        if (!ok) showToast('眼动启动失败，请检查摄像头权限');
+                    } else { showToast('当前环境不支持眼动追踪'); }
                 }
             });
         }
@@ -919,11 +925,11 @@
             document.getElementById('mainMenu').classList.add('hidden'); document.getElementById('hud').style.display = 'flex';
             updateUI();
             const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || isMobile();
-            const controlMode = eyeTracking.ready && eyeTracking.active ? '鐪煎姩' : (isTouchDevice ? '瑙︽懜' : '榧犳爣');
+            const controlMode = eyeTracking.ready && eyeTracking.active ? '眼动' : (isTouchDevice ? '触摸' : '鼠标');
             if (isTouchDevice && !eyeTracking.ready) {
-                showToast('娓告垙寮€濮嬶紒鎵嬫満鎺ㄨ崘瑙︽懜鎺у埗');
+                showToast('游戏开始！手机推荐触摸控制');
             } else {
-                showToast(`娓告垙寮€濮嬶紒浣跨敤${controlMode}鐬勫噯锛岃嚜鍔ㄦ敾鍑籤);
+                showToast(`游戏开始！使用${controlMode}瞄准，自动攻击`);
             }
         }
 
@@ -945,7 +951,7 @@
             const side = Math.random() < 0.5 ? 'left' : 'right';
             const x = side === 'left' ? -60 : game.canvas.width + 60;
             game.entities.push(new Boss(x, game.groundY - 42));
-            showToast('馃懝 Boss 鐧诲満锛?);
+            showToast('👹 Boss 登场！');
         }
 
         function updateUI() {
@@ -970,7 +976,7 @@
             } else { game.enemySpawnTimer = 0; }
             if (game.wave >= CONFIG.BOSS_SPAWN_WAVE && !game.bossSpawnedThisWave) { game.bossSpawnedThisWave = true; spawnBoss(); }
             game.waveTimer += deltaTime;
-            if (game.waveTimer > 30000) { game.wave++; game.waveTimer = 0; game.bossSpawnedThisWave = false; showToast(`绗?${game.wave} 娉㈡潵琚紒`); }
+            if (game.waveTimer > 30000) { game.wave++; game.waveTimer = 0; game.bossSpawnedThisWave = false; showToast(`第 ${game.wave} 波来袭！`); }
             game.entities.forEach(e => e.update(deltaTime)); game.particles.forEach(p => p.update(deltaTime));
             game.entities = game.entities.filter(e => !e.markedForDeletion); game.particles = game.particles.filter(p => !p.markedForDeletion);
             if (game.player) camera.update(game.player);
