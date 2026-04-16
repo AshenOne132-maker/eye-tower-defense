@@ -244,7 +244,13 @@
             startCalibration() {
                 if (this.isCalibrating) return;
                 if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
-                this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 3;
+                this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 1;
+                this.calibrationPositions = [
+                    {x: 10, y: 10}, {x: 90, y: 10}, {x: 50, y: 50}, {x: 10, y: 90}, {x: 90, y: 90}
+                ];
+                if (typeof webgazer !== 'undefined') {
+                    try { webgazer.showVideo(false); webgazer.showFaceOverlay(false); webgazer.showFaceFeedbackBox(false); } catch(e){}
+                }
                 const overlay = document.getElementById('calibrationOverlay');
                 overlay.classList.remove('hidden');
                 this.createProgressDots();
@@ -273,7 +279,7 @@
                 const pos = this.calibrationPositions[this.calibrationIndex];
                 this.createCalibrationPoint(pos.x, pos.y);
                 const remaining = this.calibrationPositions.length - this.calibrationIndex;
-                document.getElementById('calibrationInstruction').textContent = '请注视圆点并点击 ' + this.clicksPerPoint + ' 次（第 ' + (this.calibrationIndex + 1) + '/' + this.calibrationPositions.length + ' 个位置）';
+                document.getElementById('calibrationInstruction').textContent = '请注视圆点并点击（第 ' + (this.calibrationIndex + 1) + '/' + this.calibrationPositions.length + ' 个）';
             },
             createCalibrationPoint(x, y) {
                 const old = document.getElementById('currentCalibrationPoint');
@@ -312,6 +318,10 @@
             finishCalibration() {
                 this.isCalibrating = false;
                 document.getElementById('calibrationOverlay').classList.add('hidden');
+                if (typeof webgazer !== 'undefined') {
+                    try { webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true); } catch(e){}
+                }
+                this.styleVideoPreview();
                 this.ready = true;
                 updateEyeStatus(true); updateControlToggle();
                 showToast('眼动追踪已就绪！');
@@ -359,14 +369,15 @@
                 if (game.state === GameState.PLAYING && game.player) {
                     const screenW = window.innerWidth;
                     const gazeRatioX = eyeTracking.smoothX / screenW;
-                    if (typeof game.player.eyeAimX !== 'number') game.player.eyeAimX = game.player.position.x;
-                    if (gazeRatioX < 0.35) {
-                        game.player.eyeAimX -= 16 * ((0.35 - gazeRatioX) / 0.35);
-                    } else if (gazeRatioX > 0.65) {
-                        game.player.eyeAimX += 16 * ((gazeRatioX - 0.65) / 0.35);
+                    let targetOffsetX = 0;
+                    if (gazeRatioX < 0.4) {
+                        targetOffsetX = -((0.4 - gazeRatioX) / 0.4) * 700;
+                    } else if (gazeRatioX > 0.6) {
+                        targetOffsetX = ((gazeRatioX - 0.6) / 0.4) * 700;
                     }
-                    const maxOffset = 600;
-                    game.player.eyeAimX = Math.max(game.player.position.x - maxOffset, Math.min(game.player.position.x + maxOffset, game.player.eyeAimX));
+                    if (typeof game.player.eyeAimX !== 'number') game.player.eyeAimX = game.player.position.x;
+                    const targetAimX = game.player.position.x + targetOffsetX;
+                    game.player.eyeAimX += (targetAimX - game.player.eyeAimX) * 0.18;
                     game.player.aimAt(game.player.eyeAimX, game.player.position.y);
                 }
             } else if (input.hasTouch) {
@@ -1148,6 +1159,6 @@
         <div class="calibration-instruction" id="calibrationInstruction">请用眼睛注视屏幕上的圆点，并用手指点击它</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-aim-cross-v3</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-spring-aim-5pt-v1</div>
 </body>
 </html>
