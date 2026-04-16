@@ -52,15 +52,6 @@
     </style>
 </head>
 <body>
-    <script>
-        (function(){
-            const s = document.getElementById('wgScript');
-            if (s) {
-                s.onload = function() { console.log('[EyeDiag] webgazer script loaded successfully'); };
-                s.onerror = function(e) { console.error('[EyeDiag] webgazer script failed to load', e); };
-            }
-        })();
-    </script>
     <canvas id="gameCanvas"></canvas>
     <div id="mainMenu" class="menu-screen">
         <div class="game-title">👁️ 眼动塔防 v3</div>
@@ -199,59 +190,42 @@
             ],
             checkAvailable() { return typeof webgazer !== 'undefined'; },
             init() {
-                console.log('[EyeDiag] eyeTracking.init() called');
+                console.log('[EyeDiag] init called, checkAvailable=' + this.checkAvailable());
                 if (!this.checkAvailable()) {
-                    console.log('[EyeDiag] webgazer not available, will retry');
                     if (!this._initRetryCount) this._initRetryCount = 0;
                     this._initRetryCount++;
                     if (this._initRetryCount < 40) {
                         setTimeout(() => this.init(), 500);
                     } else {
-                        console.error('[EyeDiag] WebGazer failed to load after 20s');
+                        console.error('WebGazer failed to load after 20s');
                         updateEyeStatus(false);
                     }
                     return false;
                 }
                 try {
-                    console.log('[EyeDiag] calling webgazer.setGazeListener...');
                     webgazer.setGazeListener((data) => {
                         if (data && data.x != null && data.y != null) {
                             this.gazeX = data.x; this.gazeY = data.y; this.active = true; updateEyeStatus(true);
                         }
                     });
-                    console.log('[EyeDiag] calling webgazer.showVideo...');
-                    webgazer.showVideo(true);
-                    console.log('[EyeDiag] calling webgazer.showFaceOverlay...');
-                    webgazer.showFaceOverlay(true);
-                    console.log('[EyeDiag] calling webgazer.showFaceFeedbackBox...');
-                    webgazer.showFaceFeedbackBox(true);
-                    console.log('[EyeDiag] calling styleVideoPreview...');
-                    this.styleVideoPreview();
-                    this.initialized = true; this._initRetryCount = 0;
-                    console.log('[EyeDiag] eyeTracking.init() SUCCESS');
-                    return true;
-                } catch (e) {
-                    console.error('[EyeDiag] eyeTracking.init() exception:', e.name, e.message);
-                    updateEyeStatus(false);
-                    return false;
-                }
+                    webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
+                    this.styleVideoPreview(); this.initialized = true; this._initRetryCount = 0; return true;
+                } catch (e) { console.error(e); updateEyeStatus(false); return false; }
             },
             async start() {
-                console.log('[EyeDiag] eyeTracking.start() called, initialized=', this.initialized);
+                console.log('[EyeDiag] start called, initialized=' + this.initialized);
                 if (!this.initialized) return { success: false, error: '眼动引擎未初始化，请刷新页面重试' };
                 try {
                     const timeoutMs = 20000;
                     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('眼动模型加载超时（20秒），请检查网络')), timeoutMs));
-                    console.log('[EyeDiag] calling webgazer.begin()...');
                     await Promise.race([webgazer.begin(), timeoutPromise]);
-                    console.log('[EyeDiag] webgazer.begin() resolved');
                     this.active = true;
                     this.styleVideoPreview();
                     showToast('摄像头已启用，开始校准');
                     setTimeout(() => { this.startCalibration(); }, 600);
                     return { success: true };
                 } catch (e) { 
-                    console.error('[EyeDiag] eyeTracking.start() exception:', e.name, e.message); 
+                    console.error('Eye tracking start failed:', e); 
                     this.ready = false; this.active = false; updateEyeStatus(false); updateControlToggle();
                     let msg = '';
                     if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
@@ -265,7 +239,7 @@
                     }
                     return { success: false, error: msg }; 
                 }
-            },,
+            },
             startCalibration() {
                 if (this.isCalibrating) return;
                 this.isCalibrating = true; this.calibrationIndex = 0;
@@ -920,25 +894,19 @@
         }
 
         function initEyeTracking() {
+            console.log('[EyeDiag] initEyeTracking called, typeof webgazer=' + typeof window.webgazer + ', script=' + !!document.getElementById('wgScript'));
             const statusEl = document.getElementById('permissionStatus');
             const overlay = document.getElementById('permissionOverlay');
             overlay.classList.remove('hidden');
-            console.log('[EyeDiag] initEyeTracking called');
-            console.log('[EyeDiag] typeof webgazer =', typeof window.webgazer);
-            console.log('[EyeDiag] script element =', document.getElementById('wgScript'));
             if (!eyeTracking.checkAvailable()) {
-                console.error('[EyeDiag] webgazer not available');
-                statusEl.innerHTML = '眼动追踪库未加载<br>请使用触摸/鼠标'; updateEyeStatus(false);
+                statusEl.innerHTML = '眼动追踪库未加载<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                console.error('[EyeDiag] getUserMedia not supported');
-                statusEl.innerHTML = '当前浏览器不支持摄像头<br>请使用触摸/鼠标'; updateEyeStatus(false);
+                statusEl.innerHTML = '当前浏览器不支持摄像头<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
-            const initResult = eyeTracking.init();
-            console.log('[EyeDiag] eyeTracking.init() returned', initResult);
-            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启用摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏左侧允许</small>';
+            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏重新允许</small>'; eyeTracking.init();
         }
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
@@ -1142,6 +1110,6 @@
         <div class="calibration-instruction" id="calibrationInstruction">请用眼睛注视屏幕上的圆点，并用手指点击它</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-c265523-diag-v2</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-c265523-min-diag</div>
 </body>
 </html>
