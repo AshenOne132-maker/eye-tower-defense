@@ -789,10 +789,11 @@
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
 
+        function isMobile() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        }
         function bindEvents() {
             document.getElementById('startBtn').addEventListener('click', () => {
-                const overlay = document.getElementById('permissionOverlay');
-                if (!overlay.classList.contains('hidden') && eyeTracking.checkAvailable() && !eyeTracking.ready) return;
                 startGame();
             });
             document.getElementById('restartBtn').addEventListener('click', restartGame);
@@ -833,8 +834,13 @@
             camera.update(game.player);
             document.getElementById('mainMenu').classList.add('hidden'); document.getElementById('hud').style.display = 'flex';
             updateUI();
-            const controlMode = eyeTracking.ready && eyeTracking.active ? '眼动' : (window.matchMedia('(pointer: coarse)').matches ? '触摸' : '鼠标');
-            showToast(`游戏开始！使用${controlMode}瞄准，自动攻击`);
+            const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || isMobile();
+            const controlMode = eyeTracking.ready && eyeTracking.active ? '眼动' : (isTouchDevice ? '触摸' : '鼠标');
+            if (isTouchDevice && !eyeTracking.ready) {
+                showToast('游戏开始！手机推荐触摸控制');
+            } else {
+                showToast(`游戏开始！使用${controlMode}瞄准，自动攻击`);
+            }
         }
 
         function restartGame() { document.getElementById('gameOver').classList.remove('show'); startGame(); }
