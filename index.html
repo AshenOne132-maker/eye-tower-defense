@@ -337,8 +337,14 @@
             },
             update() {
                 if (this.active) {
-                    this.smoothX += (this.gazeX - this.smoothX) * 0.2;
-                    this.smoothY += (this.gazeY - this.smoothY) * 0.2;
+                    const dx = this.gazeX - this.smoothX;
+                    const dy = this.gazeY - this.smoothY;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist > 25) {
+                        const t = Math.min(1, (dist - 25) / 100) * 0.12;
+                        this.smoothX += dx * t;
+                        this.smoothY += dy * t;
+                    }
                 }
             }
         };
@@ -350,8 +356,20 @@
             const rect = game.canvas.getBoundingClientRect();
             if (eyeTracking.ready && eyeTracking.active) {
                 input.mode = 'eye';
-                const pos = camera.screenToWorld(eyeTracking.smoothX - rect.left, eyeTracking.smoothY - rect.top);
-                if (game.state === GameState.PLAYING && game.player) game.player.aimAt(pos.x, pos.y);
+                if (game.state === GameState.PLAYING && game.player) {
+                    const screenW = window.innerWidth;
+                    const gazeRatioX = eyeTracking.smoothX / screenW;
+                    let turnSpeed = 0;
+                    if (gazeRatioX < 0.35) {
+                        turnSpeed = -1.2 * ((0.35 - gazeRatioX) / 0.35);
+                    } else if (gazeRatioX > 0.65) {
+                        turnSpeed = 1.2 * ((gazeRatioX - 0.65) / 0.35);
+                    }
+                    const currentAimX = game.player.position.x + Math.cos(game.player.aimAngle) * 200;
+                    const currentAimY = game.player.position.y + Math.sin(game.player.aimAngle) * 200;
+                    const newAimX = currentAimX + turnSpeed * 18;
+                    game.player.aimAt(newAimX, currentAimY);
+                }
             } else if (input.hasTouch) {
                 input.mode = 'touch';
                 const pos = camera.screenToWorld(input.touchX, input.touchY);
@@ -764,14 +782,14 @@
                         const dx = e.position.x - this.position.x; const dy = e.position.y - this.position.y;
                         const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
                         while (diff > Math.PI) diff -= Math.PI * 2; diff = Math.abs(diff);
-                        if (diff < 0.22) { const d = this.position.dist(e.position); if (d < closestDropDist) { closestDrop = e; closestDropDist = d; } }
+                        if (diff < 0.35) { const d = this.position.dist(e.position); if (d < closestDropDist) { closestDrop = e; closestDropDist = d; } }
                     }
                     if ((e instanceof Enemy || e instanceof Boss) && e.state !== 'die') {
                         if (e.position.x < bounds.left - 30 || e.position.x > bounds.right + 30 || e.position.y < bounds.top - 30 || e.position.y > bounds.bottom + 30) continue;
                         const dx = e.position.x - this.position.x; const dy = e.position.y - this.position.y;
                         const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
                         while (diff > Math.PI) diff -= Math.PI * 2; diff = Math.abs(diff);
-                        if (diff < 0.22) { const d = this.position.dist(e.position); if (d < closestEnemyDist) { closestEnemy = e; closestEnemyDist = d; } }
+                        if (diff < 0.35) { const d = this.position.dist(e.position); if (d < closestEnemyDist) { closestEnemy = e; closestEnemyDist = d; } }
                     }
                     if (e instanceof Projectile && !e.markedForDeletion) {
                         const px = e.position.x; const py = e.position.y - e.arcY;
@@ -779,7 +797,7 @@
                         const dx = px - this.position.x; const dy = py - this.position.y;
                         const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
                         while (diff > Math.PI) diff -= Math.PI * 2; diff = Math.abs(diff);
-                        if (diff < 0.18) hitProjs.push(e);
+                        if (diff < 0.30) hitProjs.push(e);
                     }
                 }
                 return { enemy: closestEnemy, drop: closestDrop, projs: hitProjs };
