@@ -907,10 +907,48 @@
             });
             document.getElementById('restartBtn').addEventListener('click', restartGame);
             document.getElementById('menuBtn').addEventListener('click', backToMenu);
+            const permOverlay = document.getElementById('permissionOverlay');
+            const permInitial = document.getElementById('permInitial');
+            const permLoading = document.getElementById('permLoading');
+            const permError = document.getElementById('permError');
+            const permErrorText = document.getElementById('permErrorText');
+
+            const showPermState = (state) => {
+                permInitial.style.display = state === 'initial' ? 'flex' : 'none';
+                permInitial.style.flexDirection = 'column';
+                permInitial.style.alignItems = 'center';
+                permLoading.style.display = state === 'loading' ? 'flex' : 'none';
+                permError.style.display = state === 'error' ? 'flex' : 'none';
+            };
+
             document.getElementById('allowCameraBtn').addEventListener('click', async () => {
-                const success = await eyeTracking.start();
-                document.getElementById('permissionOverlay').classList.add('hidden');
-                if (!success) showToast('眼动启动失败，已切换触摸/鼠标');
+                showPermState('loading');
+                const result = await eyeTracking.start();
+                if (!result.success) {
+                    showPermState('error');
+                    permErrorText.textContent = result.error;
+                } else {
+                    permOverlay.classList.add('hidden');
+                    showPermState('initial');
+                }
+            });
+            document.getElementById('denyCameraBtn').addEventListener('click', () => {
+                permOverlay.classList.add('hidden');
+                showToast('已切换为触摸/鼠标控制');
+                updateControlToggle();
+            });
+            document.getElementById('denyCameraBtn2').addEventListener('click', () => {
+                permOverlay.classList.add('hidden');
+                showToast('已切换为触摸/鼠标控制');
+                updateControlToggle();
+            });
+            document.getElementById('cancelCameraBtn').addEventListener('click', () => {
+                eyeTracking.stop();
+                showPermState('initial');
+            });
+            document.getElementById('retryCameraBtn').addEventListener('click', () => {
+                showPermState('initial');
+                setTimeout(() => document.getElementById('allowCameraBtn').click(), 50);
             });
             document.getElementById('denyCameraBtn').addEventListener('click', () => {
                 eyeTracking.stop(); document.getElementById('permissionOverlay').classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
