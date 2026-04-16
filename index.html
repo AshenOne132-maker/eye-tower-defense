@@ -190,7 +190,17 @@
             ],
             checkAvailable() { return typeof webgazer !== 'undefined'; },
             init() {
-                if (!this.checkAvailable()) { updateEyeStatus(false); return false; }
+                if (!this.checkAvailable()) {
+                    if (!this._initRetryCount) this._initRetryCount = 0;
+                    this._initRetryCount++;
+                    if (this._initRetryCount < 40) {
+                        setTimeout(() => this.init(), 500);
+                    } else {
+                        console.error('WebGazer failed to load after 20s');
+                        updateEyeStatus(false);
+                    }
+                    return false;
+                }
                 try {
                     webgazer.setGazeListener((data) => {
                         if (data && data.x != null && data.y != null) {
@@ -198,7 +208,7 @@
                         }
                     });
                     webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
-                    this.styleVideoPreview(); this.initialized = true; return true;
+                    this.styleVideoPreview(); this.initialized = true; this._initRetryCount = 0; return true;
                 } catch (e) { console.error(e); updateEyeStatus(false); return false; }
             },
             async start() {
