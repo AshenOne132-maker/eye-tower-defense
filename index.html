@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>眼动塔防 - Eye Tower Defense</title>
+    <script src="https://cdn.jsdelivr.net/npm/webgazer@3.0.0/webgazer.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #0f0f23; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        #gameCanvas { display: block; width: 100%; height: 100%; }
+        .menu-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: linear-gradient(135deg, rgba(26,26,46,0.98) 0%, rgba(15,15,35,0.99) 100%); z-index: 200; }
+        .menu-screen.hidden { display: none !important; }
+        .game-title { font-size: clamp(28px, 8vw, 48px); font-weight: bold; color: #e94560; margin-bottom: 10px; text-shadow: 0 0 30px rgba(233, 69, 96, 0.8); }
+        .btn { padding: 12px 40px; font-size: 16px; font-weight: bold; color: white; background: linear-gradient(135deg, #e94560, #ff6b6b); border: none; border-radius: 50px; cursor: pointer; margin: 8px; }
+        .hud { position: absolute; top: 0; left: 0; width: 100%; padding: 10px 15px; display: flex; justify-content: space-between; background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent); pointer-events: none; }
+        .hud-item { display: flex; align-items: center; gap: 6px; color: white; font-size: clamp(12px, 3vw, 16px); font-weight: bold; }
+        .health-bar { width: 80px; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; overflow: hidden; }
+        .health-fill { height: 100%; background: linear-gradient(90deg, #e94560, #ff6b6b); transition: width 0.3s; }
+        .energy-bar { width: 80px; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; overflow: hidden; margin-left: 4px; }
+        .energy-fill { height: 100%; background: linear-gradient(90deg, #fbbf24, #f59e0b); transition: width  0.1s; }
+        .game-over { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.92); z-index: 300; }
+        .game-over.show { display: flex; }
+        .toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 12px 25px; background: rgba(0, 0, 0, 0.9); color: white; border-radius: 8px; font-size: 14px; z-index: 10000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        .toast.show { opacity: 1; }
+        .permission-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 5000; transition: opacity 0.3s; }
+        .permission-overlay.hidden { opacity: 0; pointer-events: none; }
+        .permission-icon { font-size: 64px; margin-bottom: 20px; }
+        .permission-title { font-size: 24px; color: #fff; font-weight: bold; margin-bottom: 10px; text-align: center; }
+        .permission-text { font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 25px; text-align: center; max-width: 300px; line-height: 1.5; }
+        .permission-status { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 15px; text-align: center; }
+        .eye-status { position: fixed; top: 10px; right: 10px; width: 12px; height: 12px; border-radius: 50%; background: #6b7280; z-index: 4000; border: 2px solid rgba(255,255,255,0.3); }
+        .eye-status.active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+        .eye-status.inactive { background: #ef4444; }
+        .control-toggle { position: fixed; top: 10px; right: 30px; padding: 4px 10px; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; border-radius: 12px; z-index: 4000; border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="mainMenu" class="menu-screen">
+        <div class="game-title">👁️ 眼动塔防</div>
+        <div style="color: rgba(255,255,255,0.6); margin-bottom: 30px; text-align: center;">竖屏游玩 · 眼动瞄准 · 变身激光</div>
+        <button class="btn" id="startBtn">开始游戏</button>
+    </div>
+    <div id="hud" class="hud" style="display: none;">
+        <div class="hud-item">
+            <span>❤️</span>
+            <div class="health-bar"><div class="health-fill" id="healthFill" style="width: 100%;"></div></div>
+        </div>
+        <div class="hud-item">
+            <span>⚡</span>
+            <div class="energy-bar"><div class="energy-fill" id="energyFill" style="width: 0%;"></div></div>
+        </div>
+        <div class="hud-item"><span>🏆</span><span id="scoreDisplay">0</span></div>
+        <div class="hud-item"><span>🌊</span><span id="waveDisplay">1</span></div>
+    </div>
+    <div id="gameOver" class="game-over">
+        <div class="game-title">游戏结束</div>
+        <div style="font-size: 24px; color: #ffd700; margin: 15px 0;">最终得分: <span id="finalScore">0</span></div>
+        <button class="btn" id="restartBtn">重新开始</button>
+        <button class="btn" id="menuBtn" style="background: linear-gradient(135deg, #4a90d9, #357abd); margin-top: 10px;">返回菜单</button>
+    </div>
+    <div id="permissionOverlay" class="permission-overlay hidden">
+        <div class="permission-icon">📷</div>
+        <div class="permission-title">启用眼动追踪</div>
+        <div class="permission-text">
+            我们需要访问摄像头来实现眼动瞄准。<br>视频仅在本地处理，不会上传。<br>您也可以拒绝，改用触摸或鼠标控制。
+        </div>
+        <button class="btn" id="allowCameraBtn">允许访问</button>
+        <button class="btn" id="denyCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563);">使用触摸/鼠标</button>
+        <div class="permission-status" id="permissionStatus">正在初始化眼动追踪...</div>
+    </div>
+    <div id="eyeStatus" class="eye-status"></div>
+    <div id="controlToggle" class="control-toggle" style="display:none;">控制: 自动</div>
+    <div id="toast" class="toast"></div>
+
+    <script>
+        class Vector2 {
+            constructor(x=0, y=0) { this.x=x; this.y=y; }
+            add(v) { return new Vector2(this.x+v.x, this.y+v.y); }
+            sub(v) { return new Vector2(this.x-v.x, this.y-v.y); }
+            mult(s) { return new Vector2(this.x*s, this.y*s); }
+            mag() { return Math.sqrt(this.x*this.x+this.y*this.y); }
+            normalize() { const m=this.mag(); return m>0?this.div(m):new Vector2(0,0); }
+            div(s) { return new Vector2(this.x/s, this.y/s); }
+            dist(v) { return this.sub(v).mag(); }
+            static fromAngle(a) { return new Vector2(Math.cos(a), Math.sin(a)); }
+        }
+
+        const CONFIG = {
+            PLAYER_MAX_HEALTH: 100,
+            LASER_DAMAGE: 15,
+            ENEMY_SPAWN_RATE: 1500,
+            ENEMY_SPEED_BASE: 0.8,
+            GROUND_HEIGHT_RATIO: 2/3,
+            ENERGY_PER_HIT: 5,
+            MAX_ENERGY: 100,
+            TRANSFORM_DRAIN: 35,
+            TRANSFORM_DAMAGE: 40,
+            BOSS_SPAWN_WAVE: 5,
+            BOSS_HEALTH: 400,
+            BOSS_KNOCKBACK_THRESHOLD: 100
+        };
+
+        const GameState = { MENU: 'menu', PLAYING: 'playing', GAME_OVER: 'game_over' };
+
+        const game = {
+            canvas: null, ctx: null, state: GameState.MENU,
+            score: 0, wave: 1, entities: [], particles: [],
+            lastTime: 0, enemySpawnTimer: 0, waveTimer: 0,
+            player: null, groundY: 0, bossSpawnedThisWave: false
+        };
+
+        const camera = {
+            x: 0, y: 0,
+            zoom: 0.72,
+            update(target) {
+                if (target) {
+                    this.x = target.position.x;
+                    // 让地面在视觉上固定位于屏幕高度的 2/3 处（距底边 1/3）
+                    const desiredScreenGroundY = game.canvas.height * (2/3);
+                    this.y = game.groundY - (desiredScreenGroundY - game.canvas.height / 2) / this.zoom;
+                }
+            },
+            apply(ctx) {
+                const cx = game.canvas.width / 2;
+                const cy = game.canvas.height / 2;
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.scale(this.zoom, this.zoom);
+                ctx.translate(-this.x, -this.y);
+            },
+            restore(ctx) { ctx.restore(); },
+            screenToWorld(sx, sy) {
+                const cx = game.canvas.width / 2;
+                const cy = game.canvas.height / 2;
+                return {
+                    x: this.x + (sx - cx) / this.zoom,
+                    y: this.y + (sy - cy) / this.zoom
+                };
+            },
+            getWorldBounds() {
+                const cx = game.canvas.width / 2;
+                const cy = game.canvas.height / 2;
+                const halfW = cx / this.zoom;
+                const halfH = cy / this.zoom;
+                return { left: this.x - halfW, right: this.x + halfW, top: this.y - halfH, bottom: this.y + halfH };
+            }
+        };
+
+        const eyeTracking = {
+            initialized: false, active: false, ready: false,
+            gazeX: 0, gazeY: 0, smoothX: 0, smoothY: 0,
+            checkAvailable() { return typeof webgazer !== 'undefined'; },
+            init() {
+                if (!this.checkAvailable()) { updateEyeStatus(false); return false; }
+                try {
+                    webgazer.setGazeListener((data) => {
+                        if (data && data.x != null && data.y != null) {
+                            this.gazeX = data.x; this.gazeY = data.y; this.active = true; updateEyeStatus(true);
+                        }
+                    });
+                    webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
+                    this.styleVideoPreview(); this.initialized = true; return true;
+                } catch (e) { console.error(e); updateEyeStatus(false); return false; }
+            },
+            async start() {
+                if (!this.initialized) return false;
+                try {
+                    await webgazer.begin(); this.ready = true; this.active = true;
+                    this.styleVideoPreview(); updateEyeStatus(true); updateControlToggle(); showToast('眼动追踪已启动'); return true;
+                } catch (e) { console.error(e); this.ready = false; updateEyeStatus(false); return false; }
+            },
+            stop() {
+                if (typeof webgazer !== 'undefined') webgazer.end();
+                this.ready = false; this.active = false; updateEyeStatus(false); updateControlToggle();
+            },
+            styleVideoPreview() {
+                setTimeout(() => {
+                    const el = document.getElementById('webgazerVideoContainer');
+                    if (el) el.style.cssText = `position:fixed!important;top:10px!important;right:10px!important;width:100px!important;height:75px!important;border-radius:8px!important;overflow:hidden!important;border:2px solid rgba(0,255,255,0.5)!important;z-index:9999!important;`;
+                }, 1000);
+            },
+            update() {
+                if (this.active) {
+                    this.smoothX += (this.gazeX - this.smoothX) * 0.2;
+                    this.smoothY += (this.gazeY - this.smoothY) * 0.2;
+                }
+            }
+        };
+
+        const input = { mode: 'mouse', mouseX: 0, mouseY: 0, touchX: 0, touchY: 0, hasTouch: false, hasMouse: false };
+
+        function updateInput() {
+            eyeTracking.update();
+            const rect = game.canvas.getBoundingClientRect();
+            if (eyeTracking.ready && eyeTracking.active) {
+                input.mode = 'eye';
+                const pos = camera.screenToWorld(eyeTracking.smoothX - rect.left, eyeTracking.smoothY - rect.top);
+                if (game.state === GameState.PLAYING && game.player) game.player.aimAt(pos.x, pos.y);
+            } else if (input.hasTouch) {
+                input.mode = 'touch';
+                const pos = camera.screenToWorld(input.touchX, input.touchY);
+                if (game.state === GameState.PLAYING && game.player) game.player.aimAt(pos.x, pos.y);
+            } else if (input.hasMouse) {
+                input.mode = 'mouse';
+                const pos = camera.screenToWorld(input.mouseX, input.mouseY);
+                if (game.state === GameState.PLAYING && game.player) game.player.aimAt(pos.x, pos.y);
+            }
+            updateControlToggle();
+        }
+
+        function updateEyeStatus(active) {
+            document.getElementById('eyeStatus').className = active ? 'eye-status active' : 'eye-status inactive';
+        }
+        function updateControlToggle() {
+            const el = document.getElementById('controlToggle');
+            if (game.state !== GameState.PLAYING) { el.style.display = 'none'; return; }
+            el.style.display = 'block';
+            const mode = eyeTracking.ready && eyeTracking.active ? '眼动' : (input.mode === 'touch' ? '触摸' : '鼠标');
+            el.textContent = '控制: ' + mode;
+        }
+
+        class Entity {
+            constructor(x, y, radius=10) {
+                this.position = new Vector2(x, y);
+                this.velocity = new Vector2(0, 0);
+                this.radius = radius;
+                this.markedForDeletion = false;
+                this.alpha = 1;
+            }
+            update(deltaTime) { this.position = this.position.add(this.velocity.mult(deltaTime/16)); }
+            draw(ctx) {}
+        }
+
+        class Particle extends Entity {
+            constructor(x, y, color, lifetime) {
+                super(x, y, 2); this.color = color; this.lifetime = lifetime; this.maxLifetime = lifetime;
+                this.velocity = new Vector2((Math.random()-0.5)*3, (Math.random()-0.5)*3);
+            }
+            update(deltaTime) {
+                super.update(deltaTime); this.lifetime -= deltaTime;
+                this.alpha = this.lifetime / this.maxLifetime;
+                if (this.lifetime <= 0) this.markedForDeletion = true;
+            }
+            draw(ctx) {
+                ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color;
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI*2); ctx.fill(); ctx.restore();
+            }
+        }
+
+        class HealthDrop extends Entity {
+            constructor(x, y) {
+                super(x, y, 12);
+                this.bobOffset = Math.random() * Math.PI * 2;
+            }
+            update(deltaTime) {
+                this.bobOffset += deltaTime * 0.005;
+            }
+            draw(ctx) {
+                const bob = Math.sin(this.bobOffset) * 4;
+                ctx.save();
+                ctx.translate(this.position.x, this.position.y + bob);
+                ctx.shadowColor = '#f472b6'; ctx.shadowBlur = 12;
+                ctx.fillStyle = '#f472b6';
+                ctx.beginPath();
+                ctx.moveTo(0, 4);
+                ctx.bezierCurveTo(-10, -6, -16, 4, 0, 14);
+                ctx.bezierCurveTo(16, 4, 10, -6, 0, 4);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.restore();
+            }
+        }
+
+        class LaserBolt extends Entity {
+            constructor(startX, startY, endX, endY) {
+                super(startX, startY, 0); this.start = new Vector2(startX, startY); this.end = new Vector2(endX, endY);
+                this.lifetime = 150; this.maxLifetime = 150;
+            }
+            update(deltaTime) {
+                this.lifetime -= deltaTime; this.alpha = this.lifetime / this.maxLifetime;
+                if (this.lifetime <= 0) this.markedForDeletion = true;
+            }
+            draw(ctx) {
+                ctx.save();
+                const grad = ctx.createLinearGradient(this.start.x, this.start.y, this.end.x, this.end.y);
+                grad.addColorStop(0, `rgba(255,100,100,${this.alpha})`);
+                grad.addColorStop(0.5, `rgba(255,200,100,${this.alpha})`);
+                grad.addColorStop(1, `rgba(255,100,100,${this.alpha * 0.5})`);
+                ctx.strokeStyle = grad; ctx.lineWidth = 6 * this.alpha; ctx.lineCap = 'round';
+                ctx.beginPath(); ctx.moveTo(this.start.x, this.start.y); ctx.lineTo(this.end.x, this.end.y); ctx.stroke();
+                ctx.fillStyle = `rgba(255,255,200,${this.alpha})`;
+                ctx.beginPath(); ctx.arc(this.end.x, this.end.y, 4 * this.alpha, 0, Math.PI*2); ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class BeamLaser extends Entity {
+            constructor(x, y, direction) {
+                super(x, y, 0); this.position = new Vector2(x, y); this.lifetime = 500; this.maxLifetime = 500;
+                this.width = 70; this.hitEnemies = new Set(); this.direction = direction;
+            }
+            update(deltaTime) {
+                this.lifetime -= deltaTime; this.alpha = this.lifetime / this.maxLifetime;
+                if (this.lifetime <= 0) this.markedForDeletion = true;
+                if (this.lifetime > 50) {
+                    const bounds = camera.getWorldBounds();
+                    for (const e of game.entities) {
+                        if (e instanceof Enemy && e.state !== 'die' && !this.hitEnemies.has(e)) {
+                            const dy = Math.abs(e.position.y - this.position.y);
+                            if (dy < this.width / 2 + e.radius) {
+                                const inBeam = this.direction === 'left' ? e.position.x <= this.position.x : e.position.x >= this.position.x;
+                                if (inBeam && e.position.x >= bounds.left - 50 && e.position.x <= bounds.right + 50) {
+                                    e.takeDamage(CONFIG.TRANSFORM_DAMAGE); this.hitEnemies.add(e);
+                                    if (game.player) game.player.gainEnergy(CONFIG.ENERGY_PER_HIT * 0.5);
+                                    for (let i = 0; i < 8; i++) game.particles.push(new Particle(e.position.x, e.position.y, '#ff4444', 350));
+                                }
+                            }
+                        }
+                    }
+                    for (const p of game.entities) {
+                        if (p instanceof Projectile && !p.markedForDeletion) {
+                            const dy = Math.abs((p.position.y - p.arcY) - this.position.y);
+                            if (dy < this.width / 2 + p.radius) {
+                                const inBeam = this.direction === 'left' ? p.position.x <= this.position.x : p.position.x >= this.position.x;
+                                if (inBeam) { p.markedForDeletion = true; for (let i = 0; i < 5; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 300)); }
+                            }
+                        }
+                    }
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                const alpha = this.alpha;
+                const w = this.direction === 'left' ? this.position.x - camera.getWorldBounds().left + 100 : camera.getWorldBounds().right - this.position.x + 100;
+                const x = this.direction === 'left' ? camera.getWorldBounds().left - 50 : this.position.x;
+                const y = this.position.y;
+                ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 30;
+                const grad = ctx.createLinearGradient(0, y - this.width/2, 0, y + this.width/2);
+                grad.addColorStop(0, `rgba(255,0,0,0)`); grad.addColorStop(0.3, `rgba(255,50,50,${alpha * 0.4})`);
+                grad.addColorStop(0.5, `rgba(255,80,80,${alpha * 0.7})`); grad.addColorStop(0.7, `rgba(255,50,50,${alpha * 0.4})`); grad.addColorStop(1, `rgba(255,0,0,0)`);
+                ctx.fillStyle = grad; ctx.fillRect(x, y - this.width/2, w, this.width);
+                ctx.shadowBlur = 15; ctx.fillStyle = `rgba(255,200,200,${alpha})`; ctx.fillRect(x, y - 8, w, 16);
+                ctx.strokeStyle = `rgba(255,150,150,${alpha * 0.8})`; ctx.lineWidth = 2;
+                for (let i = 1; i <= 3; i++) {
+                    const waveY = y + Math.sin(this.lifetime * 0.02 + i) * (i * 10);
+                    ctx.beginPath(); ctx.moveTo(x, waveY);
+                    for (let px = 0; px <= w; px += 20) { const drawX = x + px; ctx.lineTo(drawX, waveY + Math.sin(px * 0.05 + this.lifetime * 0.02 * 2) * 3); }
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        }
+
+        class Projectile extends Entity {
+            constructor(x, y, target, isBoss = false) {
+                super(x, y, 6); this.target = target; this.isBoss = isBoss;
+                this.speed = isBoss ? 4 : 3; this.damage = isBoss ? 15 : 8;
+                this.arcY = 0; this.flightTime = 0; this.heightArc = isBoss ? 70 : 45;
+            }
+            update(deltaTime) {
+                if (!this.target || this.target.health <= 0) { this.markedForDeletion = true; return; }
+                const dir = this.target.position.sub(this.position).normalize();
+                this.velocity = dir.mult(this.speed);
+                super.update(deltaTime);
+                this.flightTime += deltaTime;
+                const progress = Math.min(this.flightTime / 500, 1);
+                this.arcY = Math.sin(progress * Math.PI) * this.heightArc;
+                if (this.position.dist(this.target.position) < this.target.radius + this.radius + 8) {
+                    this.target.takeDamage(this.damage); this.markedForDeletion = true;
+                    for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.target.position.x, this.target.position.y, '#ff3333', 250));
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y, 4, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = this.isBoss ? '#ff6b6b' : '#fbbf24';
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y - this.arcY, this.radius, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = this.isBoss ? '#dc2626' : '#d97706'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y - this.arcY, this.radius, 0, Math.PI*2); ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Enemy extends Entity {
+            constructor(x, y, type) {
+                super(x, y, type === 'melee' ? 25 : 20);
+                this.type = type; this.health = type === 'melee' ? 60 : 40; this.maxHealth = this.health;
+                this.speed = type === 'melee' ? 0.9 : 0.65; this.attackRange = type === 'melee' ? 50 : 220;
+                this.attackCooldown = 0; this.damage = type === 'melee' ? 10 : 6; this.color = type === 'melee' ? '#e94560' : '#4a90d9';
+                this.state = 'move'; this.animFrame = 0; this.deathTimer = 0;
+                this.dashTimer = 0; this.isDashing = false;
+            }
+            update(deltaTime) {
+                super.update(deltaTime); this.animFrame += deltaTime * 0.005;
+                if (this.attackCooldown > 0) this.attackCooldown -= deltaTime;
+                const player = game.entities.find(e => e instanceof Player);
+                if (!player || this.state === 'die') return;
+                if (this.isDashing) {
+                    this.dashTimer -= deltaTime;
+                    if (this.dashTimer <= 0) { this.isDashing = false; this.velocity = new Vector2(0, 0); }
+                    this.position.y = game.groundY - this.radius; return;
+                }
+                if (this.state === 'hit') {
+                    this.velocity = this.velocity.mult(0.9);
+                    if (this.velocity.mag() < 0.1) this.state = 'move';
+                    this.position.y = game.groundY - this.radius; return;
+                }
+                const dist = this.position.dist(player.position);
+                const dir = player.position.sub(this.position).normalize();
+                if (dist > this.attackRange) {
+                    this.state = 'move'; this.velocity = dir.mult(this.speed);
+                } else if (this.attackCooldown <= 0) {
+                    this.attack(player, dist);
+                } else { this.velocity = new Vector2(0, 0); }
+                this.position.y = game.groundY - this.radius;
+            }
+            attack(player, dist) {
+                if (this.type === 'melee') {
+                    this.attackCooldown = 1200;
+                    this.isDashing = true; this.dashTimer = 300;
+                    const dashDir = player.position.sub(this.position).normalize();
+                    this.velocity = dashDir.mult(5);
+                    setTimeout(() => {
+                        if (this.state !== 'die' && player && this.position.dist(player.position) < this.radius + player.radius + 10) {
+                            player.takeDamage(this.damage);
+                        }
+                    }, 200);
+                } else {
+                    this.attackCooldown = 2200;
+                    game.entities.push(new Projectile(this.position.x, this.position.y - 15, player, false));
+                }
+            }
+            takeDamage(amount) {
+                this.health -= amount;
+                for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*30, this.position.y + (Math.random()-0.5)*30, '#ffaa00', 250));
+                if (this.health <= 0) {
+                    this.state = 'die'; game.score += this.type === 'melee' ? 100 : 150;
+                    if (Math.random() < 0.25) game.entities.push(new HealthDrop(this.position.x, this.position.y));
+                } else {
+                    this.state = 'hit';
+                    const player = game.entities.find(e => e instanceof Player);
+                    if (player) { const knockDir = this.position.sub(player.position).normalize(); this.velocity = knockDir.mult(2); }
+                }
+            }
+            draw(ctx) {
+                if (this.state === 'die') {
+                    this.deathTimer += 16; const alpha = Math.max(0, 1 - this.deathTimer / 800);
+                    if (alpha <= 0) { this.markedForDeletion = true; return; }
+                    ctx.save(); ctx.globalAlpha = alpha; if (Math.floor(this.deathTimer / 100) % 2 === 0) ctx.globalAlpha = alpha * 0.5;
+                    ctx.translate(this.position.x, this.position.y + 10); ctx.fillStyle = this.color;
+                    ctx.beginPath(); ctx.ellipse(0, 0, this.radius * 1.2, this.radius * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = '#1a1a2e'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(-8, -5); ctx.lineTo(-2, 1); ctx.moveTo(-2, -5); ctx.lineTo(-8, 1); ctx.moveTo(2, -5); ctx.lineTo(8, 1); ctx.moveTo(8, -5); ctx.lineTo(2, 1); ctx.stroke(); ctx.restore(); return;
+                }
+                ctx.save(); ctx.translate(this.position.x, this.position.y);
+                const bob = this.state === 'move' ? Math.sin(this.animFrame * 8) * 3 : 0;
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath(); ctx.ellipse(0, this.radius * 0.5 - bob, this.radius * 0.8, this.radius * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.translate(0, -bob);
+                const grad = ctx.createRadialGradient(-5, -5, 0, 0, 0, this.radius);
+                grad.addColorStop(0, this.color); grad.addColorStop(1, this.darkenColor(this.color, 40)); ctx.fillStyle = grad;
+                ctx.beginPath(); if (this.type === 'melee') ctx.roundRect(-this.radius, -this.radius, this.radius * 2, this.radius * 2, 8); else ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = this.darkenColor(this.color, 60); ctx.lineWidth = 2; ctx.stroke();
+                const player = game.entities.find(e => e instanceof Player);
+                let lookAngle = 0; if (player) lookAngle = Math.atan2(player.position.y - this.position.y, player.position.x - this.position.x);
+                const eyeOff = this.type === 'melee' ? 6 : 8; const px = Math.cos(lookAngle) * 2; const py = Math.sin(lookAngle) * 2;
+                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(-eyeOff, -4, 5, 0, Math.PI * 2); ctx.arc(eyeOff, -4, 5, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#1a1a2e'; ctx.beginPath(); ctx.arc(-eyeOff + px, -4 + py, 2.5, 0, Math.PI * 2); ctx.arc(eyeOff + px, -4 + py, 2.5, 0, Math.PI * 2); ctx.fill();
+                if (this.health < this.maxHealth) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-20, -this.radius - 10, 40, 4); ctx.fillStyle = this.health > this.maxHealth * 0.5 ? '#4ade80' : this.health > this.maxHealth * 0.25 ? '#fbbf24' : '#ef4444'; ctx.fillRect(-20, -this.radius - 10, 40 * (this.health / this.maxHealth), 4); }
+                ctx.restore();
+            }
+            darkenColor(color, percent) { const num = parseInt(color.replace('#', ''), 16); const amt = Math.round(2.55 * percent); const R = Math.max((num >> 16) - amt, 0), G = Math.max((num >> 8 & 0x00FF) - amt, 0), B = Math.max((num & 0x0000FF) - amt, 0); return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1); }
+        }
+
+        class Boss extends Entity {
+            constructor(x, y) {
+                super(x, y, 42); this.maxHealth = CONFIG.BOSS_HEALTH; this.health = this.maxHealth;
+                this.speed = 0.55; this.attackRangeMelee = 55; this.damageMelee = 18; this.damageRange = 12;
+                this.state = 'chase'; this.animFrame = 0; this.deathTimer = 0; this.stunTimer = 0;
+                this.projectileTimer = 0; this.meleeCooldown = 0; this.dashTimer = 0;
+                this.nextKnockbackHealth = this.maxHealth - CONFIG.BOSS_KNOCKBACK_THRESHOLD;
+                this.color = '#8B4513'; this.facingRight = true;
+            }
+            update(deltaTime) {
+                super.update(deltaTime); this.animFrame += deltaTime * 0.004;
+                if (this.state === 'die') return;
+                if (this.state === 'stun') { this.stunTimer -= deltaTime; if (this.stunTimer <= 0) this.state = 'chase'; return; }
+                if (this.state === 'knockback') { this.velocity = this.velocity.mult(0.88); if (this.velocity.mag() < 0.3) { this.state = 'stun'; this.stunTimer = 2200; } this.clampToScreen(); this.position.y = game.groundY - this.radius; return; }
+                if (this.state === 'dash') { this.dashTimer -= deltaTime; if (this.dashTimer <= 0) { this.state = 'chase'; this.velocity = new Vector2(0, 0); } this.position.y = game.groundY - this.radius; return; }
+
+                const player = game.entities.find(e => e instanceof Player); if (!player) return;
+                const dist = this.position.dist(player.position);
+                this.facingRight = player.position.x >= this.position.x;
+                this.projectileTimer -= deltaTime; this.meleeCooldown -= deltaTime;
+
+                if (dist <= this.attackRangeMelee && this.meleeCooldown <= 0) {
+                    this.meleeCooldown = 1800; this.state = 'dash'; this.dashTimer = 350;
+                    const dashDir = player.position.sub(this.position).normalize(); this.velocity = dashDir.mult(5.5);
+                    setTimeout(() => { if (this.state !== 'die' && player && this.position.dist(player.position) < this.radius + player.radius + 10) player.takeDamage(this.damageMelee); }, 220);
+                } else if (dist > this.attackRangeMelee) {
+                    this.state = 'chase'; const dir = player.position.sub(this.position).normalize(); this.velocity = dir.mult(this.speed);
+                    if (this.projectileTimer <= 0) { this.projectileTimer = 2500; game.entities.push(new Projectile(this.position.x, this.position.y - 25, player, true)); }
+                } else { this.velocity = new Vector2(0, 0); }
+                this.position.y = game.groundY - this.radius;
+            }
+            takeDamage(amount) {
+                this.health -= amount;
+                for (let i = 0; i < 8; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*50, this.position.y + (Math.random()-0.5)*40, '#ffaa00', 300));
+                if (this.health <= this.nextKnockbackHealth && this.state !== 'knockback' && this.state !== 'stun') {
+                    this.nextKnockbackHealth -= CONFIG.BOSS_KNOCKBACK_THRESHOLD;
+                    this.triggerKnockback();
+                }
+                if (this.health <= 0) { this.state = 'die'; game.score += 2000; showToast('🎉 Boss 被击败！'); }
+            }
+            triggerKnockback() {
+                this.state = 'knockback'; const player = game.entities.find(e => e instanceof Player);
+                if (player) { const awayDir = this.position.sub(player.position).normalize(); this.velocity = awayDir.mult(7); }
+                else { this.velocity = new Vector2(this.facingRight ? -7 : 7, 0); }
+                for (let i = 0; i < 15; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#ff6600', 400));
+            }
+            clampToScreen() {
+                const bounds = camera.getWorldBounds();
+                this.position.x = Math.max(bounds.left + this.radius + 20, Math.min(bounds.right - this.radius - 20, this.position.x));
+            }
+            draw(ctx) {
+                if (this.state === 'die') {
+                    this.deathTimer += 16; const alpha = Math.max(0, 1 - this.deathTimer / 1000);
+                    if (alpha <= 0) { this.markedForDeletion = true; return; }
+                    ctx.save(); ctx.globalAlpha = alpha; if (Math.floor(this.deathTimer / 100) % 2 === 0) ctx.globalAlpha = alpha * 0.5;
+                    ctx.translate(this.position.x, this.position.y); ctx.scale(1 + this.deathTimer/2000, 0.5 - this.deathTimer/3000);
+                    ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI*2); ctx.fill(); ctx.restore(); return;
+                }
+                ctx.save(); ctx.translate(this.position.x, this.position.y);
+                const bob = (this.state === 'chase' || this.state === 'dash') ? Math.sin(this.animFrame * 6) * 2 : 0;
+                ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, this.radius * 0.6 - bob, this.radius * 0.9, this.radius * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.translate(0, -bob);
+                const grad = ctx.createRadialGradient(-8, -8, 0, 0, 0, this.radius);
+                grad.addColorStop(0, '#A0522D'); grad.addColorStop(1, '#5D4037'); ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.roundRect(-this.radius, -this.radius * 0.9, this.radius * 2, this.radius * 1.8, 14); ctx.fill();
+                ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3; ctx.stroke();
+                // 耳朵
+                ctx.fillStyle = '#5D4037'; ctx.beginPath(); ctx.moveTo(-25, -30); ctx.lineTo(-35, -55); ctx.lineTo(-12, -35); ctx.fill(); ctx.beginPath(); ctx.moveTo(25, -30); ctx.lineTo(35, -55); ctx.lineTo(12, -35); ctx.fill();
+                // 眼睛
+                let eyeColor, pupilColor, eyeY;
+                if (this.state === 'stun') { eyeColor = '#90a4ae'; pupilColor = '#37474f'; eyeY = 2; }
+                else if (this.state === 'knockback') { eyeColor = '#cfd8dc'; pupilColor = '#b71c1c'; eyeY = 1; }
+                else { eyeColor = '#ffeb3b'; pupilColor = '#000000'; eyeY = -2; }
+                ctx.fillStyle = eyeColor; ctx.beginPath(); ctx.ellipse(-14, eyeY, 9, 7, 0, 0, Math.PI*2); ctx.ellipse(14, eyeY, 9, 7, 0, 0, Math.PI*2); ctx.fill();
+                if (this.state === 'knockback') {
+                    ctx.strokeStyle = pupilColor; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(-18, eyeY-3); ctx.lineTo(-10, eyeY+3); ctx.moveTo(-10, eyeY-3); ctx.lineTo(-18, eyeY+3); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(10, eyeY-3); ctx.lineTo(18, eyeY+3); ctx.moveTo(18, eyeY-3); ctx.lineTo(10, eyeY+3); ctx.stroke();
+                } else {
+                    const pupilSize = this.state === 'dash' ? 6 : 4;
+                    ctx.fillStyle = pupilColor; ctx.beginPath();
+                    ctx.arc(-14 + (this.facingRight ? 3 : -3), eyeY, pupilSize, 0, Math.PI*2);
+                    ctx.arc(14 + (this.facingRight ? 3 : -3), eyeY, pupilSize, 0, Math.PI*2); ctx.fill();
+                    if (this.state === 'dash') {
+                        ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 2;
+                        ctx.beginPath(); ctx.moveTo(-22, -10); ctx.lineTo(-10, -6); ctx.moveTo(10, -6); ctx.lineTo(22, -10); ctx.stroke();
+                    }
+                }
+                // 嘴
+                if (this.state === 'stun') {
+                    ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 12, 8, 0, Math.PI, false); ctx.stroke();
+                    ctx.fillStyle = '#ffd700'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+                    ctx.fillText('★', -30, -40); ctx.fillText('★', 30, -45); ctx.fillText('★', 0, -55);
+                } else if (this.state === 'knockback') {
+                    ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.moveTo(-8, 12); ctx.quadraticCurveTo(0, 8, 8, 12); ctx.stroke();
+                } else if (this.state === 'dash') {
+                    ctx.fillStyle = '#4a0000'; ctx.beginPath(); ctx.arc(0, 16, 18, 0, Math.PI, false); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-10, 16); ctx.lineTo(-5, 26); ctx.lineTo(0, 16); ctx.fill(); ctx.beginPath(); ctx.moveTo(0, 16); ctx.lineTo(5, 26); ctx.lineTo(10, 16); ctx.fill();
+                } else {
+                    ctx.fillStyle = '#4a0000'; ctx.beginPath(); ctx.arc(0, 14, 14, 0, Math.PI, false); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-8, 14); ctx.lineTo(-4, 22); ctx.lineTo(0, 14); ctx.fill(); ctx.beginPath(); ctx.moveTo(0, 14); ctx.lineTo(4, 22); ctx.lineTo(8, 14); ctx.fill();
+                    ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.ellipse(0, 2, 5, 4, 0, 0, Math.PI*2); ctx.fill();
+                }
+                // 血条
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-30, -this.radius - 14, 60, 6);
+                ctx.fillStyle = this.health > this.maxHealth * 0.5 ? '#4ade80' : this.health > this.maxHealth * 0.25 ? '#fbbf24' : '#ef4444';
+                ctx.fillRect(-30, -this.radius - 14, 60 * (this.health / this.maxHealth), 6);
+                ctx.restore();
+            }
+        }
+
+        class Player extends Entity {
+            constructor(x, y) {
+                super(x, y, 30);
+                this.health = CONFIG.PLAYER_MAX_HEALTH; this.maxHealth = CONFIG.PLAYER_MAX_HEALTH;
+                this.energy = 0; this.maxEnergy = CONFIG.MAX_ENERGY; this.isTransformed = false;
+                this.aimAngle = -Math.PI / 2; this.fireCooldown = 0; this.blinkTimer = 0; this.isBlinking = false;
+                this.transformPulse = 0; this.hitFlash = 0; this.happyTimer = 0;
+            }
+            aimAt(x, y) { this.aimAngle = Math.atan2(y - this.position.y, x - this.position.x); }
+            gainEnergy(amount) { if (this.isTransformed) return; this.energy = Math.min(this.maxEnergy, this.energy + amount); if (this.energy >= this.maxEnergy) this.activateTransform(); }
+            activateTransform() { this.isTransformed = true; this.radius = 45; showToast('🔥 变身！超级横扫激光！'); }
+            deactivateTransform() { this.isTransformed = false; this.energy = 0; this.radius = 30; }
+            findInteractablesOnRay() {
+                const bounds = camera.getWorldBounds();
+                let closestEnemy = null, closestEnemyDist = Infinity;
+                let closestDrop = null, closestDropDist = Infinity;
+                const hitProjs = [];
+                for (const e of game.entities) {
+                    if (e instanceof HealthDrop) {
+                        if (e.position.x < bounds.left - 30 || e.position.x > bounds.right + 30) continue;
+                        const dx = e.position.x - this.position.x; const dy = e.position.y - this.position.y;
+                        const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
+                        while (diff > Math.PI) diff -= Math.PI * 2; diff = Math.abs(diff);
+                        if (diff < 0.22) { const d = this.position.dist(e.position); if (d < closestDropDist) { closestDrop = e; closestDropDist = d; } }
+                    }
+                    if ((e instanceof Enemy || e instanceof Boss) && e.state !== 'die') {
+                        if (e.position.x < bounds.left - 30 || e.position.x > bounds.right + 30 || e.position.y < bounds.top - 30 || e.position.y > bounds.bottom + 30) continue;
+                        const dx = e.position.x - this.position.x; const dy = e.position.y - this.position.y;
+                        const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
+                        while (diff > Math.PI) diff -= Math.PI * 2; diff = Math.abs(diff);
+                        if (diff < 0.22) { const d = this.position.dist(e.position); if (d < closestEnemyDist) { closestEnemy = e; closestEnemyDist = d; } }
+                    }
+                    if (e instanceof Projectile && !e.markedForDeletion) {
+                        const px = e.position.x; const py = e.position.y - e.arcY;
+                        if (px < bounds.left - 30 || px > bounds.right + 30) continue;
+                        const dx = px - this.position.x; const dy = py - this.position.y;
+                        const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
+                        while (diff > Math.PI) diff -= Math.PI * 2; diff = Math.abs(diff);
+                        if (diff < 0.18) hitProjs.push(e);
+                    }
+                }
+                return { enemy: closestEnemy, drop: closestDrop, projs: hitProjs };
+            }
+            fire() {
+                if (this.fireCooldown > 0) return;
+                if (this.isTransformed) {
+                    this.fireCooldown = 450;
+                    const direction = (Math.abs(this.aimAngle) < Math.PI / 2) ? 'right' : 'left';
+                    game.entities.push(new BeamLaser(this.position.x, this.position.y, direction));
+                    for (let i = 0; i < 15; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*60, this.position.y + (Math.random()-0.5)*20, '#ff4444', 400));
+                } else {
+                    const { enemy, drop, projs } = this.findInteractablesOnRay();
+                    let laserEnd = null; let fired = false;
+                    if (projs.length > 0) {
+                        for (const p of projs) { p.markedForDeletion = true; for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 250)); }
+                        const farProj = projs.reduce((a, b) => this.position.dist(a.position) > this.position.dist(b.position) ? a : b);
+                        laserEnd = new Vector2(farProj.position.x, farProj.position.y - farProj.arcY); fired = true;
+                    }
+                    if (drop) {
+                        drop.markedForDeletion = true; this.health = Math.min(this.maxHealth, this.health + 25); this.happyTimer = 1800;
+                        for (let i = 0; i < 10; i++) game.particles.push(new Particle(drop.position.x, drop.position.y, '#f472b6', 400));
+                        for (let i = 0; i < 6; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*40, this.position.y - 35 + (Math.random()-0.5)*20, '#ff69b4', 500));
+                        if (!laserEnd || this.position.dist(drop.position) > this.position.dist(laserEnd)) laserEnd = drop.position; fired = true;
+                    }
+                    if (enemy) {
+                        this.fireCooldown = 220; enemy.takeDamage(CONFIG.LASER_DAMAGE); this.gainEnergy(CONFIG.ENERGY_PER_HIT);
+                        if (!laserEnd || this.position.dist(enemy.position) > this.position.dist(laserEnd)) laserEnd = enemy.position; fired = true;
+                    }
+                    if (fired && laserEnd) {
+                        if (!enemy && (drop || projs.length > 0)) this.fireCooldown = 220;
+                        game.entities.push(new LaserBolt(this.position.x, this.position.y, laserEnd.x, laserEnd.y));
+                        if (enemy) for (let i = 0; i < 5; i++) game.particles.push(new Particle(enemy.position.x, enemy.position.y, '#ffff00', 200));
+                    }
+                }
+            }
+            takeDamage(amount) {
+                this.health = Math.max(0, this.health - amount); this.hitFlash = 350;
+                for (let i = 0; i < 10; i++) game.particles.push(new Particle(this.position.x + (Math.random() - 0.5) * 40, this.position.y + (Math.random() - 0.5) * 40, '#ff0000', 400));
+                if (this.health <= 0) gameOver();
+            }
+            update(deltaTime) {
+                super.update(deltaTime); if (this.fireCooldown > 0) this.fireCooldown -= deltaTime;
+                if (this.hitFlash > 0) this.hitFlash -= deltaTime;
+                if (this.happyTimer > 0) this.happyTimer -= deltaTime;
+                this.blinkTimer += deltaTime;
+                if (this.blinkTimer > 3000) { this.isBlinking = true; if (this.blinkTimer > 3200) { this.isBlinking = false; this.blinkTimer = 0; } }
+                if (this.isTransformed) {
+                    this.energy -= (CONFIG.TRANSFORM_DRAIN / 1000) * deltaTime; this.transformPulse += deltaTime * 0.01;
+                    if (this.energy <= 0) this.deactivateTransform();
+                    if (this.fireCooldown <= 0) this.fire();
+                } else { if (this.fireCooldown <= 0) this.fire(); }
+            }
+            draw(ctx) {
+                ctx.save();
+                if (this.isTransformed) {
+                    const pulse = 0.8 + Math.sin(this.transformPulse) * 0.2;
+                    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 30 * pulse;
+                    ctx.fillStyle = `rgba(255, 0, 0, ${0.15 * pulse})`;
+                    ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius + 15, 0, Math.PI*2); ctx.fill();
+                }
+                if (this.hitFlash > 0) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1, this.hitFlash / 300 * 0.7)})`;
+                    ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius + 8, 0, Math.PI*2); ctx.fill();
+                }
+                if (this.happyTimer > 0) {
+                    const pulse = 0.6 + Math.sin(Date.now() * 0.01) * 0.4;
+                    ctx.fillStyle = `rgba(255, 182, 193, ${0.2 * pulse})`;
+                    ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius + 10 + pulse * 5, 0, Math.PI*2); ctx.fill();
+                    // 头顶小爱心
+                    if (Math.floor(Date.now() / 200) % 2 === 0) {
+                        ctx.fillStyle = '#ff69b4'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+                        ctx.fillText('♥', this.position.x - 18, this.position.y - this.radius - 5);
+                        ctx.fillText('♥', this.position.x + 18, this.position.y - this.radius - 8);
+                    }
+                }
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath(); ctx.ellipse(this.position.x, this.position.y + 25, 25, 8, 0, 0, Math.PI*2); ctx.fill();
+                const baseColor1 = this.isTransformed ? '#ff6b6b' : '#6b7280'; const baseColor2 = this.isTransformed ? '#dc2626' : '#374151';
+                const grad = ctx.createRadialGradient(this.position.x-5, this.position.y-5, 0, this.position.x, this.position.y, this.radius);
+                grad.addColorStop(0, baseColor1); grad.addColorStop(1, baseColor2); ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = this.isTransformed ? '#991b1b' : '#1f2937'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = this.isTransformed ? '#ef4444' : '#4b5563';
+                const earScale = this.isTransformed ? 1.3 : 1;
+                ctx.beginPath(); ctx.moveTo(this.position.x-15*earScale, this.position.y-20); ctx.lineTo(this.position.x-22*earScale, this.position.y-38); ctx.lineTo(this.position.x-8*earScale, this.position.y-28); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(this.position.x+15*earScale, this.position.y-20); ctx.lineTo(this.position.x+22*earScale, this.position.y-38); ctx.lineTo(this.position.x+8*earScale, this.position.y-28); ctx.fill();
+                if (!this.isBlinking) {
+                    const eyeX = Math.cos(this.aimAngle) * 3; const eyeY = Math.sin(this.aimAngle) * 3;
+                    if (this.isTransformed) {
+                        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(this.position.x-10, this.position.y-5, 8, 6, -0.25, 0, Math.PI*2); ctx.ellipse(this.position.x+10, this.position.y-5, 8, 6, 0.25, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = '#ff0000'; ctx.beginPath(); ctx.arc(this.position.x-10+eyeX, this.position.y-5+eyeY, 5, 0, Math.PI*2); ctx.arc(this.position.x+10+eyeX, this.position.y-5+eyeY, 5, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = '#000000'; ctx.beginPath(); ctx.ellipse(this.position.x-10+eyeX, this.position.y-5+eyeY, 1.5, 5, 0, 0, Math.PI*2); ctx.ellipse(this.position.x+10+eyeX, this.position.y-5+eyeY, 1.5, 5, 0, 0, Math.PI*2); ctx.fill();
+                    } else if (this.happyTimer > 0) {
+                        // 享受表情：弯眼笑
+                        ctx.strokeStyle = '#374151'; ctx.lineWidth = 3;
+                        ctx.beginPath(); ctx.arc(this.position.x-10, this.position.y-6, 5, 0, Math.PI, false); ctx.stroke();
+                        ctx.beginPath(); ctx.arc(this.position.x+10, this.position.y-6, 5, 0, Math.PI, false); ctx.stroke();
+                    } else {
+                        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(this.position.x-10, this.position.y-5, 8, 0, Math.PI*2); ctx.arc(this.position.x+10, this.position.y-5, 8, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(this.position.x-10+eyeX, this.position.y-5+eyeY, 4, 0, Math.PI*2); ctx.arc(this.position.x+10+eyeX, this.position.y-5+eyeY, 4, 0, Math.PI*2); ctx.fill();
+                    }
+                } else {
+                    ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(this.position.x-16, this.position.y-5); ctx.lineTo(this.position.x-4, this.position.y-5); ctx.moveTo(this.position.x+4, this.position.y-5); ctx.lineTo(this.position.x+16, this.position.y-5); ctx.stroke();
+                }
+                if (this.isTransformed) {
+                    ctx.fillStyle = '#7f1d1d'; ctx.beginPath(); ctx.arc(this.position.x, this.position.y + 8, 12, 0, Math.PI, false); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(this.position.x - 8, this.position.y + 8); ctx.lineTo(this.position.x - 4, this.position.y + 18); ctx.lineTo(this.position.x, this.position.y + 8); ctx.fill(); ctx.beginPath(); ctx.moveTo(this.position.x, this.position.y + 8); ctx.lineTo(this.position.x + 4, this.position.y + 18); ctx.lineTo(this.position.x + 8, this.position.y + 8); ctx.fill();
+                } else if (this.happyTimer > 0) {
+                    // 享受嘴：大弧形微笑
+                    ctx.strokeStyle = '#374151'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.arc(this.position.x, this.position.y + 10, 8, 0, Math.PI, false); ctx.stroke();
+                } else {
+                    ctx.strokeStyle = '#374151'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(this.position.x - 5, this.position.y + 12); ctx.lineTo(this.position.x + 5, this.position.y + 12); ctx.stroke();
+                }
+                ctx.strokeStyle = this.isTransformed ? '#fca5a5' : '#6b7280'; ctx.lineWidth = 1.5;
+                for (let i = 0; i < 3; i++) { const y = this.position.y + 5 + i * 4; ctx.beginPath(); ctx.moveTo(this.position.x - 20, y); ctx.lineTo(this.position.x - 45, y - 5 + i * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(this.position.x + 20, y); ctx.lineTo(this.position.x + 45, y - 5 + i * 2); ctx.stroke(); }
+                if (!this.isTransformed && this.health < this.maxHealth * 0.3) { ctx.fillStyle = `rgba(255, 0, 0, ${0.2 + Math.sin(Date.now() / 100) * 0.1})`; ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius + 8, 0, Math.PI * 2); ctx.fill(); }
+                ctx.restore();
+            }
+        }
+
+        function init() {
+            game.canvas = document.getElementById('gameCanvas'); game.ctx = game.canvas.getContext('2d');
+            resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+            bindEvents(); bindInputEvents(); requestAnimationFrame(gameLoop);
+            setTimeout(() => { initEyeTracking(); }, 500);
+        }
+
+        function initEyeTracking() {
+            const statusEl = document.getElementById('permissionStatus');
+            const overlay = document.getElementById('permissionOverlay');
+            if (!eyeTracking.checkAvailable()) {
+                statusEl.innerHTML = '眼动追踪库未加载<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
+                setTimeout(() => { overlay.classList.add('hidden'); }, 1500); return;
+            }
+            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头'; overlay.classList.remove('hidden'); eyeTracking.init();
+        }
+
+        function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
+
+        function bindEvents() {
+            document.getElementById('startBtn').addEventListener('click', () => {
+                const overlay = document.getElementById('permissionOverlay');
+                if (!overlay.classList.contains('hidden') && eyeTracking.checkAvailable() && !eyeTracking.ready) return;
+                startGame();
+            });
+            document.getElementById('restartBtn').addEventListener('click', restartGame);
+            document.getElementById('menuBtn').addEventListener('click', backToMenu);
+            document.getElementById('allowCameraBtn').addEventListener('click', async () => {
+                const success = await eyeTracking.start();
+                document.getElementById('permissionOverlay').classList.add('hidden');
+                if (!success) showToast('眼动启动失败，已切换触摸/鼠标');
+            });
+            document.getElementById('denyCameraBtn').addEventListener('click', () => {
+                eyeTracking.stop(); document.getElementById('permissionOverlay').classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
+            });
+            document.getElementById('controlToggle').addEventListener('click', async () => {
+                if (eyeTracking.ready && eyeTracking.active) {
+                    eyeTracking.stop(); showToast('已手动切换为触摸/鼠标');
+                } else {
+                    if (eyeTracking.checkAvailable()) {
+                        showToast('正在尝试启动眼动...');
+                        const ok = await eyeTracking.start();
+                        if (!ok) showToast('眼动启动失败，请检查摄像头权限');
+                    } else { showToast('当前环境不支持眼动追踪'); }
+                }
+            });
+        }
+
+        function bindInputEvents() {
+            game.canvas.addEventListener('mousemove', (e) => { input.mouseX = e.clientX; input.mouseY = e.clientY; input.hasMouse = true; });
+            game.canvas.addEventListener('mouseleave', () => { input.hasMouse = false; });
+            game.canvas.addEventListener('touchstart', (e) => { input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY; }, { passive: false });
+            game.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY; }, { passive: false });
+            game.canvas.addEventListener('touchend', () => { input.hasTouch = false; });
+        }
+
+        function startGame() {
+            game.state = GameState.PLAYING; game.score = 0; game.wave = 1; game.entities = []; game.particles = [];
+            game.enemySpawnTimer = 0; game.waveTimer = 0; game.bossSpawnedThisWave = false;
+            game.player = new Player(game.canvas.width / 2, game.groundY - 40); game.entities.push(game.player);
+            camera.update(game.player);
+            document.getElementById('mainMenu').classList.add('hidden'); document.getElementById('hud').style.display = 'flex';
+            updateUI();
+            const controlMode = eyeTracking.ready && eyeTracking.active ? '眼动' : (window.matchMedia('(pointer: coarse)').matches ? '触摸' : '鼠标');
+            showToast(`游戏开始！使用${controlMode}瞄准，自动攻击`);
+        }
+
+        function restartGame() { document.getElementById('gameOver').classList.remove('show'); startGame(); }
+        function backToMenu() { game.state = GameState.MENU; document.getElementById('gameOver').classList.remove('show'); document.getElementById('mainMenu').classList.remove('hidden'); document.getElementById('hud').style.display = 'none'; }
+        function gameOver() { game.state = GameState.GAME_OVER; document.getElementById('finalScore').textContent = game.score; document.getElementById('gameOver').classList.add('show'); }
+
+        function hasBossAlive() { return game.entities.some(e => e instanceof Boss && e.state !== 'die'); }
+
+        function spawnEnemy() {
+            const side = Math.random() < 0.5 ? 'left' : 'right';
+            const x = side === 'left' ? -50 : game.canvas.width + 50;
+            const type = Math.random() < 0.55 ? 'melee' : 'ranged';
+            const y = game.groundY - (type === 'melee' ? 25 : 20);
+            game.entities.push(new Enemy(x, y, type));
+        }
+
+        function spawnBoss() {
+            const side = Math.random() < 0.5 ? 'left' : 'right';
+            const x = side === 'left' ? -60 : game.canvas.width + 60;
+            game.entities.push(new Boss(x, game.groundY - 42));
+            showToast('👹 Boss 登场！');
+        }
+
+        function updateUI() {
+            if (game.player) { document.getElementById('healthFill').style.width = (game.player.health / game.player.maxHealth * 100) + '%'; document.getElementById('energyFill').style.width = (game.player.energy / game.player.maxEnergy * 100) + '%'; }
+            document.getElementById('scoreDisplay').textContent = game.score; document.getElementById('waveDisplay').textContent = game.wave;
+        }
+
+        function showToast(msg) { const el = document.getElementById('toast'); el.textContent = msg; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2500); }
+
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - game.lastTime; game.lastTime = timestamp; updateInput();
+            if (game.state === GameState.PLAYING) { update(deltaTime); render(); updateUI(); }
+            else if (game.state === GameState.MENU) { renderMenuBackground(); }
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update(deltaTime) {
+            if (!hasBossAlive()) {
+                game.enemySpawnTimer += deltaTime;
+                const spawnRate = Math.max(600, CONFIG.ENEMY_SPAWN_RATE - game.wave * 120);
+                if (game.enemySpawnTimer > spawnRate) { spawnEnemy(); game.enemySpawnTimer = 0; }
+            } else { game.enemySpawnTimer = 0; }
+            if (game.wave >= CONFIG.BOSS_SPAWN_WAVE && !game.bossSpawnedThisWave) { game.bossSpawnedThisWave = true; spawnBoss(); }
+            game.waveTimer += deltaTime;
+            if (game.waveTimer > 30000) { game.wave++; game.waveTimer = 0; game.bossSpawnedThisWave = false; showToast(`第 ${game.wave} 波来袭！`); }
+            game.entities.forEach(e => e.update(deltaTime)); game.particles.forEach(p => p.update(deltaTime));
+            game.entities = game.entities.filter(e => !e.markedForDeletion); game.particles = game.particles.filter(p => !p.markedForDeletion);
+            if (game.player) camera.update(game.player);
+        }
+
+        function render() {
+            const ctx = game.ctx; const w = game.canvas.width; const h = game.canvas.height;
+            ctx.fillStyle = '#0f0f23'; ctx.fillRect(0, 0, w, h);
+            renderStaticBackground();
+            camera.apply(ctx);
+            renderGround();
+            game.particles.forEach(p => p.draw(ctx));
+            game.entities.sort((a, b) => a.position.y - b.position.y).forEach(e => e.draw(ctx));
+            if (game.player) drawAimLine(ctx);
+            camera.restore(ctx);
+        }
+
+        function renderStaticBackground() {
+            const ctx = game.ctx; const w = game.canvas.width; const h = game.canvas.height;
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, '#0f0f23'); grad.addColorStop(0.4, '#1a1a3e'); grad.addColorStop(0.8, '#16213e'); grad.addColorStop(1, '#1a3a3e');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            for (let i = 0; i < 80; i++) { const x = (i * 137) % w; const y = (i * 71) % (h * 0.6); const size = 1 + (i % 3); ctx.beginPath(); ctx.arc(x, y, size * 0.5, 0, Math.PI * 2); ctx.fill(); }
+        }
+
+        function renderGround() {
+            const ctx = game.ctx; const bounds = camera.getWorldBounds(); const groundY = game.groundY;
+            const left = bounds.left - 800; const right = bounds.right + 800;
+            const grad = ctx.createLinearGradient(0, groundY, 0, groundY + 500);
+            grad.addColorStop(0, '#2d3748'); grad.addColorStop(0.3, '#1a202c'); grad.addColorStop(1, '#0d1117'); ctx.fillStyle = grad;
+            ctx.fillRect(left, groundY, right - left, 1000);
+            ctx.fillStyle = '#4a5568'; ctx.fillRect(left, groundY, right - left, 3);
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            for (let x = Math.floor(left / 30) * 30; x <= right; x += 30) { ctx.fillRect(x, groundY + 10 + (Math.abs(x) % 50), 20, 4); }
+            ctx.fillStyle = '#0d1a2d';
+            ctx.beginPath(); ctx.moveTo(left, groundY);
+            for (let x = left; x <= right; x += 50) { const y = groundY - 20 - Math.sin(x * 0.01) * 20 - Math.sin(x * 0.03) * 10; ctx.lineTo(x, y); }
+            ctx.lineTo(right, groundY); ctx.fill();
+        }
+
+        function drawAimLine(ctx) {
+            if (!game.player) return; const start = game.player.position; const angle = game.player.aimAngle;
+            const maxDist = Math.max(game.canvas.width, game.canvas.height) * 2;
+            const endX = start.x + Math.cos(angle) * maxDist; const endY = start.y + Math.sin(angle) * maxDist;
+            ctx.save(); ctx.strokeStyle = game.player.isTransformed ? 'rgba(255, 100, 100, 0.35)' : 'rgba(233, 69, 96, 0.25)';
+            ctx.lineWidth = game.player.isTransformed ? 3 : 1; ctx.setLineDash([6, 6]);
+            ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(endX, endY); ctx.stroke(); ctx.restore();
+        }
+
+        function renderMenuBackground() {
+            const ctx = game.ctx; const w = game.canvas.width; const h = game.canvas.height;
+            ctx.fillStyle = '#0f0f23'; ctx.fillRect(0, 0, w, h); renderStaticBackground();
+        }
+
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>

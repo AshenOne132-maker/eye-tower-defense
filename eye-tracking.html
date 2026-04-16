@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>眼动追踪塔防 - 激光瞄准系统</title>
+    
+    <!-- WebGazer.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/webgazer@3.0.0/webgazer.min.js"></script>
+    
+    <style>
+        /* ===== 全局样式 ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            overflow: hidden;
+            color: #fff;
+        }
+        
+        /* ===== 视频预览容器 ===== */
+        #webgazerVideoContainer {
+            position: fixed !important;
+            top: 10px !important;
+            right: 10px !important;
+            width: 120px !important;
+            height: 90px !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
+            border: 2px solid rgba(0, 255, 255, 0.5) !important;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3) !important;
+            z-index: 1000 !important;
+        }
+        
+        #webgazerVideoFeed {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+        }
+        
+        #webgazerFaceOverlay {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+        }
+        
+        #webgazerFaceFeedbackBox {
+            position: absolute !important;
+            border: 2px solid #00ff00 !important;
+            border-radius: 50% !important;
+        }
+        
+        /* ===== 主容器 ===== */
+        .main-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        /* ===== 游戏画布 ===== */
+        #gameCanvas {
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 16/9;
+            background: radial-gradient(ellipse at center, #1a3a52 0%, #0d1f2d 70%, #050a0f 100%);
+            border-radius: 16px;
+            border: 3px solid rgba(0, 200, 255, 0.4);
+            box-shadow: 
+                0 0 40px rgba(0, 150, 255, 0.2),
+                inset 0 0 60px rgba(0, 100, 200, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* ===== 激光瞄准点 ===== */
+        .laser-point {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 50, 50, 0.9) 0%, rgba(255, 0, 0, 0.6) 40%, transparent 70%);
+            box-shadow: 
+                0 0 20px rgba(255, 0, 0, 0.8),
+                0 0 40px rgba(255, 50, 50, 0.5),
+                inset 0 0 10px rgba(255, 200, 200, 0.5);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 100;
+            transition: opacity 0.1s ease;
+        }
+        
+        .laser-point::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 200px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent 0%, rgba(255, 0, 0, 0.8) 50%, transparent 100%);
+            transform: translate(-50%, -50%) rotate(45deg);
+            animation: laserSweep 2s ease-in-out infinite;
+        }
+        
+        @keyframes laserSweep {
+            0%, 100% { opacity: 0.3; transform: translate(-50%, -50%) rotate(45deg) scaleX(0.5); }
+            50% { opacity: 0.8; transform: translate(-50%, -50%) rotate(45deg) scaleX(1); }
+        }
+        
+        /* ===== 校准界面 ===== */
+        .calibration-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            transition: opacity 0.3s ease;
+        }
+        
+        .calibration-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .calibration-title {
+            font-size: clamp(1.5rem, 5vw, 2.5rem);
+            font-weight: bold;
+            margin-bottom: 20px;
+            text-align: center;
+            background: linear-gradient(90deg, #00ffff, #ff00ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .calibration-instruction {
+            font-size: clamp(1rem, 3vw, 1.3rem);
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 40px;
+            text-align: center;
+            max-width: 600px;
+            line-height: 1.6;
+            padding: 0 20px;
+        }
+        
+        .calibration-point {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #00ffff 0%, #0088ff 100%);
+            box-shadow: 
+                0 0 30px rgba(0, 255, 255, 0.6),
+                inset 0 0 20px rgba(255, 255, 255, 0.3);
+            position: absolute;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        .calibration-point:hover {
+            transform: scale(1.2);
+            box-shadow: 
+                0 0 50px rgba(0, 255, 255, 0.8),
+                inset 0 0 30px rgba(255, 255, 255, 0.5);
+        }
+        
+        .calibration-point.completed {
+            background: radial-gradient(circle, #00ff00 0%, #00aa00 100%);
+            animation: none;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(0.9); opacity: 0.8; }
+        }
+        
+        .calibration-progress {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+        }
+        
+        .progress-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transition: background 0.3s ease;
+        }
+        
+        .progress-dot.active {
+            background: #00ffff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.6);
+        }
+        
+        .progress-dot.completed {
+            background: #00ff00;
+        }
+        
+        /* ===== 控制面板 ===== */
+        .control-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 500;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px 25px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 114, 255, 0.4);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 114, 255, 0.5);
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        /* ===== 状态显示 ===== */
+        .status-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 500;
+            min-width: 200px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        
+        .status-indicator.online {
+            background: #00ff00;
+            box-shadow: 0 0 8px #00ff00;
+        }
+        
+        .status-indicator.offline {
+            background: #ff4444;
+            box-shadow: 0 0 8px #ff4444;
+        }
+        
+        .status-indicator.warning {
+            background: #ffaa00;
+            box-shadow: 0 0 8px #ffaa00;
+        }
+        
+        .gaze-coords {
+            font-family: 'Courier New', monospace;
+            color: #00ffff;
+            font-size: 12px;
+        }
+        
+        /* ===== 加载界面 ===== */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+            transition: opacity 0.5s ease;
+        }
+        
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .loading-spinner {
+            width: 80px;
+            height: 80px;
+            border: 4px solid rgba(0, 255, 255, 0.2);
+            border-top-color: #00ffff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .loading-text {
+            margin-top: 30px;
+            font-size: 1.2rem;
+            color: rgba(255, 255, 255, 0.8);
+            text-align: center;
+        }
+        
+        .loading-subtext {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        /* ===== 权限请求界面 ===== */
+        .permission-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2500;
+            padding: 30px;
+        }
+        
+        .permission-overlay.hidden {
+            display: none;
+        }
+        
+        .permission-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+        
+        .permission-title {
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .permission-text {
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.8);
+            text-align: center;
+            max-width: 500px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        
+        /* ===== 响应式适配 ===== */
+        @media (max-width: 768px) {
+            #webgazerVideoContainer {
+                width: 80px !important;
+                height: 60px !important;
+                top: 5px !important;
+                right: 5px !important;
+            }
+            
+            .control-panel {
+                padding: 10px 15px;
+                gap: 10px;
+                bottom: 10px;
+            }
+            
+            .btn {
+                padding: 10px 18px;
+                font-size: 12px;
+            }
+            
+            .status-panel {
+                top: 10px;
+                left: 10px;
+                padding: 10px 15px;
+                min-width: 150px;
+            }
+            
+            .calibration-point {
+                width: 40px;
+                height: 40px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .calibration-title {
+                font-size: 1.2rem;
+            }
+            
+            .calibration-instruction {
+                font-size: 0.9rem;
+            }
+            
+            .control-panel {
+                flex-wrap: wrap;
+                justify-content: center;
+                max-width: 90%;
+            }
+        }
+        
+        /* ===== 游戏元素样式 ===== */
+        .tower {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #4a90d9 0%, #2c5aa0 100%);
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 15px rgba(0, 100, 255, 0.4);
+        }
+        
+        .tower::before {
+            content: '🔮';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+        }
+        
+        .enemy {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(circle, #ff6b6b 0%, #c92a2a 100%);
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
+        }
+        
+        .enemy::before {
+            content: '👾';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 16px;
+        }
+        
+        /* ===== 激光束 ===== */
+        .laser-beam {
+            position: absolute;
+            height: 3px;
+            background: linear-gradient(90deg, transparent 0%, #ff0000 20%, #ff6666 50%, #ff0000 80%, transparent 100%);
+            box-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000;
+            transform-origin: left center;
+            pointer-events: none;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body>
+    <!-- 加载界面 -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在初始化眼动追踪引擎...</div>
+        <div class="loading-subtext">请允许摄像头权限以继续</div>
+    </div>
+    
+    <!-- 权限请求界面 -->
+    <div id="permissionOverlay" class="permission-overlay hidden">
+        <div class="permission-icon">📷</div>
+        <div class="permission-title">需要摄像头权限</div>
+        <div class="permission-text">
+            眼动追踪需要访问您的摄像头来分析视线方向。<br>
+            所有处理都在本地完成，不会上传任何视频数据。
+        </div>
+        <button class="btn btn-primary" onclick="eyeTrackingModule.requestCameraPermission()">允许访问摄像头</button>
+    </div>
+    
+    <!-- 校准界面 -->
+    <div id="calibrationOverlay" class="calibration-overlay hidden">
+        <div class="calibration-title">👁️ 眼动追踪校准</div>
+        <div class="calibration-instruction" id="calibrationInstruction">
+            请用眼睛注视屏幕上移动的点，并点击它<br>
+            这将帮助系统学习您的视线模式
+        </div>
+        <div class="calibration-progress" id="calibrationProgress"></div>
+    </div>
+    
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 游戏画布 -->
+        <div id="gameCanvas">
+            <!-- 激光瞄准点 -->
+            <div id="laserPoint" class="laser-point" style="display: none;"></div>
+            
+            <!-- 示例塔 -->
+            <div class="tower" style="bottom: 20px; left: 50%; transform: translateX(-50%);"></div>
+        </div>
+        
+        <!-- 状态面板 -->
+        <div class="status-panel">
+            <div class="status-item">
+                <div id="statusIndicator" class="status-indicator offline"></div>
+                <span id="statusText">未连接</span>
+            </div>
+            <div class="status-item">
+                <span>注视点:</span>
+                <span id="gazeCoords" class="gaze-coords">---, ---</span>
+            </div>
+            <div class="status-item">
+                <span>置信度:</span>
+                <span id="confidenceLevel">0%</span>
+            </div>
+        </div>
+        
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <button class="btn btn-primary" id="btnStart" onclick="eyeTrackingModule.start()">启动追踪</button>
+            <button class="btn btn-secondary" id="btnCalibrate" onclick="eyeTrackingModule.startCalibration()" disabled>重新校准</button>
+            <button class="btn btn-secondary" id="btnToggleVideo" onclick="eyeTrackingModule.toggleVideoPreview()">隐藏预览</button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ============================================
+         * 眼动追踪模块 - Eye Tracking Module
+         * ============================================
+         * 基于 WebGazer.js 的眼动追踪实现
+         * 提供实时视线追踪、校准、坐标映射等功能
+         */
+        
+        const eyeTrackingModule = {
+            // ===== 状态变量 =====
+            isInitialized: false,
+            isTracking: false,
+            isCalibrating: false,
+            calibrationPoints: [],
+            currentCalibrationIndex: 0,
+            showVideoPreview: true,
+            gazePoint: { x: 0, y: 0 },
+            confidence: 0,
+            
+            // ===== 配置参数 =====
+            config: {
+                // 校准点位置 (相对于屏幕的百分比)
+                calibrationPositions: [
+                    { x: 10, y: 10 },   // 左上
+                    { x: 50, y: 10 },   // 中上
+                    { x: 90, y: 10 },   // 右上
+                    { x: 10, y: 50 },   // 左中
+                    { x: 50, y: 50 },   // 中心
+                    { x: 90, y: 50 },   // 右中
+                    { x: 10, y: 90 },   // 左下
+                    { x: 50, y: 90 },   // 中下
+                    { x: 90, y: 90 }    // 右下
+                ],
+                // 每个校准点的点击次数
+                clicksPerPoint: 3,
+                // 采样平滑度 (越大越平滑但延迟越高)
+                smoothingFactor: 0.3
+            },
+            
+            // ===== DOM 元素引用 =====
+            elements: {},
+            
+            /**
+             * 初始化模块
+             */
+            init() {
+                this.cacheElements();
+                this.setupEventListeners();
+                this.updateStatus('initializing', '正在初始化...');
+                
+                // 初始化 WebGazer
+                this.initializeWebGazer();
+            },
+            
+            /**
+             * 缓存 DOM 元素引用
+             */
+            cacheElements() {
+                this.elements = {
+                    loadingOverlay: document.getElementById('loadingOverlay'),
+                    permissionOverlay: document.getElementById('permissionOverlay'),
+                    calibrationOverlay: document.getElementById('calibrationOverlay'),
+                    calibrationInstruction: document.getElementById('calibrationInstruction'),
+                    calibrationProgress: document.getElementById('calibrationProgress'),
+                    gameCanvas: document.getElementById('gameCanvas'),
+                    laserPoint: document.getElementById('laserPoint'),
+                    statusIndicator: document.getElementById('statusIndicator'),
+                    statusText: document.getElementById('statusText'),
+                    gazeCoords: document.getElementById('gazeCoords'),
+                    confidenceLevel: document.getElementById('confidenceLevel'),
+                    btnStart: document.getElementById('btnStart'),
+                    btnCalibrate: document.getElementById('btnCalibrate'),
+                    btnToggleVideo: document.getElementById('btnToggleVideo')
+                };
+            },
+            
+            /**
+             * 设置事件监听器
+             */
+            setupEventListeners() {
+                // 窗口大小改变时重新计算校准点
+                window.addEventListener('resize', () => {
+                    if (this.isCalibrating) {
+                        this.updateCalibrationPointPosition();
+                    }
+                });
+                
+                // 可见性变化时暂停/恢复追踪
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden && this.isTracking) {
+                        this.pauseTracking();
+                    } else if (!document.hidden && this.isInitialized) {
+                        this.resumeTracking();
+                    }
+                });
+            },
+            
+            /**
+             * 初始化 WebGazer
+             */
+            async initializeWebGazer() {
+                try {
+                    // 检查 WebGazer 是否加载
+                    if (typeof webgazer === 'undefined') {
+                        throw new Error('WebGazer 库未加载，请检查网络连接');
+                    }
+                    
+                    // 配置 WebGazer
+                    webgazer.setGazeListener((data, timestamp) => {
+                        this.onGazeUpdate(data, timestamp);
+                    });
+                    
+                    // 设置调试显示（视频预览）
+                    webgazer.showVideo(this.showVideoPreview);
+                    webgazer.showFaceOverlay(true);
+                    webgazer.showFaceFeedbackBox(true);
+                    
+                    // 设置视频预览容器样式
+                    this.styleVideoPreview();
+                    
+                    this.isInitialized = true;
+                    this.hideLoading();
+                    this.showPermissionRequest();
+                    
+                } catch (error) {
+                    console.error('WebGazer 初始化失败:', error);
+                    this.updateStatus('offline', '初始化失败');
+                    this.showError('初始化失败: ' + error.message);
+                }
+            },
+            
+            /**
+             * 设置视频预览样式
+             */
+            styleVideoPreview() {
+                // WebGazer 会自动创建视频容器，我们需要等待它创建完成后设置样式
+                setTimeout(() => {
+                    const videoContainer = document.getElementById('webgazerVideoContainer');
+                    if (videoContainer) {
+                        videoContainer.style.cssText = `
+                            position: fixed !important;
+                            top: 10px !important;
+                            right: 10px !important;
+                            width: 120px !important;
+                            height: 90px !important;
+                            border-radius: 12px !important;
+                            overflow: hidden !important;
+                            border: 2px solid rgba(0, 255, 255, 0.5) !important;
+                            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3) !important;
+                            z-index: 1000 !important;
+                        `;
+                    }
+                }, 1000);
+            },
+            
+            /**
+             * 隐藏加载界面
+             */
+            hideLoading() {
+                this.elements.loadingOverlay.classList.add('hidden');
+            },
+            
+            /**
+             * 显示权限请求界面
+             */
+            showPermissionRequest() {
+                this.elements.permissionOverlay.classList.remove('hidden');
+            },
+            
+            /**
+             * 请求摄像头权限
+             */
+            async requestCameraPermission() {
+                try {
+                    this.elements.permissionOverlay.classList.add('hidden');
+                    this.showLoading('正在请求摄像头权限...');
+                    
+                    // 开始 WebGazer（这会触发摄像头权限请求）
+                    await webgazer.begin();
+                    
+                    this.hideLoading();
+                    this.updateStatus('online', '已连接');
+                    this.elements.btnStart.disabled = false;
+                    this.elements.btnCalibrate.disabled = false;
+                    
+                    // 自动开始校准
+                    setTimeout(() => {
+                        this.startCalibration();
+                    }, 500);
+                    
+                } catch (error) {
+                    console.error('摄像头权限请求失败:', error);
+                    this.hideLoading();
+                    this.showError('无法访问摄像头: ' + error.message + '\n\n请确保:\n1. 已允许摄像头权限\n2. 摄像头未被其他应用占用\n3. 设备有可用摄像头');
+                    this.elements.permissionOverlay.classList.remove('hidden');
+                }
+            },
+            
+            /**
+             * 显示加载界面
+             */
+            showLoading(text = '加载中...') {
+                this.elements.loadingOverlay.querySelector('.loading-text').textContent = text;
+                this.elements.loadingOverlay.classList.remove('hidden');
+            },
+            
+            /**
+             * 显示错误信息
+             */
+            showError(message) {
+                alert(message);
+            },
+            
+            /**
+             * 开始眼动追踪
+             */
+            start() {
+                if (!this.isInitialized) {
+                    this.showError('请先完成初始化');
+                    return;
+                }
+                
+                this.isTracking = true;
+                this.elements.laserPoint.style.display = 'block';
+                this.elements.btnStart.textContent = '停止追踪';
+                this.elements.btnStart.onclick = () => this.stop();
+                
+                this.updateStatus('online', '追踪中');
+            },
+            
+            /**
+             * 停止眼动追踪
+             */
+            stop() {
+                this.isTracking = false;
+                this.elements.laserPoint.style.display = 'none';
+                this.elements.btnStart.textContent = '启动追踪';
+                this.elements.btnStart.onclick = () => this.start();
+                
+                this.updateStatus('online', '已暂停');
+            },
+            
+            /**
+             * 暂停追踪（页面不可见时）
+             */
+            pauseTracking() {
+                if (this.isTracking) {
+                    this.wasTrackingBeforeHide = true;
+                    this.isTracking = false;
+                    this.elements.laserPoint.style.display = 'none';
+                }
+            },
+            
+            /**
+             * 恢复追踪
+             */
+            resumeTracking() {
+                if (this.wasTrackingBeforeHide && !document.hidden) {
+                    this.isTracking = true;
+                    this.elements.laserPoint.style.display = 'block';
+                    this.wasTrackingBeforeHide = false;
+                }
+            },
+            
+            /**
+             * 开始校准流程
+             */
+            startCalibration() {
+                if (this.isCalibrating) return;
+                
+                this.isCalibrating = true;
+                this.currentCalibrationIndex = 0;
+                this.calibrationPoints = [];
+                
+                // 显示校准界面
+                this.elements.calibrationOverlay.classList.remove('hidden');
+                
+                // 创建进度指示器
+                this.createProgressDots();
+                
+                // 显示第一个校准点
+                this.showNextCalibrationPoint();
+            },
+            
+            /**
+             * 创建进度指示器
+             */
+            createProgressDots() {
+                const container = this.elements.calibrationProgress;
+                container.innerHTML = '';
+                
+                for (let i = 0; i < this.config.calibrationPositions.length; i++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'progress-dot';
+                    dot.id = `progress-dot-${i}`;
+                    container.appendChild(dot);
+                }
+            },
+            
+            /**
+             * 显示下一个校准点
+             */
+            showNextCalibrationPoint() {
+                if (this.currentCalibrationIndex >= this.config.calibrationPositions.length) {
+                    this.finishCalibration();
+                    return;
+                }
+                
+                // 更新进度指示器
+                for (let i = 0; i < this.config.calibrationPositions.length; i++) {
+                    const dot = document.getElementById(`progress-dot-${i}`);
+                    dot.classList.remove('active', 'completed');
+                    if (i < this.currentCalibrationIndex) {
+                        dot.classList.add('completed');
+                    } else if (i === this.currentCalibrationIndex) {
+                        dot.classList.add('active');
+                    }
+                }
+                
+                // 创建校准点
+                const pos = this.config.calibrationPositions[this.currentCalibrationIndex];
+                this.createCalibrationPoint(pos.x, pos.y);
+                
+                // 更新说明文字
+                const remaining = this.config.calibrationPositions.length - this.currentCalibrationIndex;
+                this.elements.calibrationInstruction.innerHTML = 
+                    `请用眼睛注视并点击屏幕上的点<br>剩余 ${remaining} 个校准点`;
+            },
+            
+            /**
+             * 创建校准点元素
+             */
+            createCalibrationPoint(x, y) {
+                // 移除旧的校准点
+                const oldPoint = document.getElementById('currentCalibrationPoint');
+                if (oldPoint) {
+                    oldPoint.remove();
+                }
+                
+                // 计算实际位置
+                const screenX = (x / 100) * window.innerWidth;
+                const screenY = (y / 100) * window.innerHeight;
+                
+                // 创建新校准点
+                const point = document.createElement('div');
+                point.id = 'currentCalibrationPoint';
+                point.className = 'calibration-point';
+                point.style.left = screenX + 'px';
+                point.style.top = screenY + 'px';
+                point.style.transform = 'translate(-50%, -50%)';
+                
+                // 点击事件
+                point.addEventListener('click', (e) => {
+                    this.onCalibrationPointClick(e, x, y);
+                });
+                
+                // 触摸事件（移动端）
+                point.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.onCalibrationPointClick(e, x, y);
+                });
+                
+                this.elements.calibrationOverlay.appendChild(point);
+            },
+            
+            /**
+             * 校准点点击处理
+             */
+            onCalibrationPointClick(event, x, y) {
+                // 记录校准数据
+                this.calibrationPoints.push({
+                    screenX: (x / 100) * window.innerWidth,
+                    screenY: (y / 100) * window.innerHeight,
+                    timestamp: Date.now()
+                });
+                
+                // 视觉反馈
+                const point = document.getElementById('currentCalibrationPoint');
+                if (point) {
+                    point.classList.add('completed');
+                    setTimeout(() => {
+                        point.remove();
+                    }, 200);
+                }
+                
+                // 下一个校准点
+                this.currentCalibrationIndex++;
+                setTimeout(() => {
+                    this.showNextCalibrationPoint();
+                }, 300);
+            },
+            
+            /**
+             * 更新校准点位置（窗口大小改变时）
+             */
+            updateCalibrationPointPosition() {
+                if (!this.isCalibrating) return;
+                
+                const point = document.getElementById('currentCalibrationPoint');
+                if (point) {
+                    const pos = this.config.calibrationPositions[this.currentCalibrationIndex];
+                    const screenX = (pos.x / 100) * window.innerWidth;
+                    const screenY = (pos.y / 100) * window.innerHeight;
+                    point.style.left = screenX + 'px';
+                    point.style.top = screenY + 'px';
+                }
+            },
+            
+            /**
+             * 完成校准
+             */
+            finishCalibration() {
+                this.isCalibrating = false;
+                this.elements.calibrationOverlay.classList.add('hidden');
+                
+                // 清除校准点
+                const point = document.getElementById('currentCalibrationPoint');
+                if (point) point.remove();
+                
+                // 启用控制按钮
+                this.elements.btnCalibrate.disabled = false;
+                
+                // 自动开始追踪
+                setTimeout(() => {
+                    this.start();
+                }, 500);
+                
+                console.log('校准完成，记录了', this.calibrationPoints.length, '个校准点');
+            },
+            
+            /**
+             * 视线更新回调
+             */
+            onGazeUpdate(data, timestamp) {
+                if (!data) return;
+                
+                // 提取视线坐标
+                const x = data.x;
+                const y = data.y;
+                
+                // 应用平滑处理
+                this.gazePoint.x = this.smoothValue(this.gazePoint.x, x, this.config.smoothingFactor);
+                this.gazePoint.y = this.smoothValue(this.gazePoint.y, y, this.config.smoothingFactor);
+                
+                // 计算置信度（基于数据质量）
+                this.confidence = this.calculateConfidence(data);
+                
+                // 更新显示
+                this.updateGazeDisplay();
+                
+                // 如果正在追踪，更新激光点位置
+                if (this.isTracking) {
+                    this.updateLaserPosition();
+                }
+            },
+            
+            /**
+             * 平滑值计算
+             */
+            smoothValue(current, target, factor) {
+                return current + (target - current) * factor;
+            },
+            
+            /**
+             * 计算置信度
+             */
+            calculateConfidence(data) {
+                // 基于数据稳定性和范围计算置信度
+                let confidence = 80; // 基础置信度
+                
+                // 检查坐标是否在合理范围内
+                if (data.x < 0 || data.x > window.innerWidth ||
+                    data.y < 0 || data.y > window.innerHeight) {
+                    confidence -= 30;
+                }
+                
+                return Math.max(0, Math.min(100, confidence));
+            },
+            
+            /**
+             * 更新视线显示
+             */
+            updateGazeDisplay() {
+                // 更新坐标显示
+                this.elements.gazeCoords.textContent = 
+                    `${Math.round(this.gazePoint.x)}, ${Math.round(this.gazePoint.y)}`;
+                
+                // 更新置信度
+                this.elements.confidenceLevel.textContent = `${Math.round(this.confidence)}%`;
+                
+                // 根据置信度更新状态指示器
+                const indicator = this.elements.statusIndicator;
+                indicator.classList.remove('online', 'offline', 'warning');
+                
+                if (this.confidence > 70) {
+                    indicator.classList.add('online');
+                } else if (this.confidence > 40) {
+                    indicator.classList.add('warning');
+                } else {
+                    indicator.classList.add('offline');
+                }
+            },
+            
+            /**
+             * 更新激光点位置
+             */
+            updateLaserPosition() {
+                const laser = this.elements.laserPoint;
+                const canvas = this.elements.gameCanvas;
+                
+                // 获取画布在屏幕上的位置
+                const canvasRect = canvas.getBoundingClientRect();
+                
+                // 将屏幕坐标转换为画布内坐标
+                let x = this.gazePoint.x - canvasRect.left;
+                let y = this.gazePoint.y - canvasRect.top;
+                
+                // 限制在画布范围内
+                x = Math.max(0, Math.min(x, canvasRect.width));
+                y = Math.max(0, Math.min(y, canvasRect.height));
+                
+                // 应用位置
+                laser.style.left = x + 'px';
+                laser.style.top = y + 'px';
+                
+                // 触发激光效果
+                this.triggerLaserEffect(x, y);
+            },
+            
+            /**
+             * 触发激光效果
+             */
+            triggerLaserEffect(x, y) {
+                // 这里可以添加击中检测、粒子效果等游戏逻辑
+                // 示例：在控制台输出注视点
+                if (Math.random() < 0.05) { // 降低输出频率
+                    console.log('激光注视点:', { x: Math.round(x), y: Math.round(y) });
+                }
+            },
+            
+            /**
+             * 切换视频预览显示
+             */
+            toggleVideoPreview() {
+                this.showVideoPreview = !this.showVideoPreview;
+                webgazer.showVideo(this.showVideoPreview);
+                
+                this.elements.btnToggleVideo.textContent = 
+                    this.showVideoPreview ? '隐藏预览' : '显示预览';
+                
+                // 更新视频容器样式
+                const videoContainer = document.getElementById('webgazerVideoContainer');
+                if (videoContainer) {
+                    videoContainer.style.display = this.showVideoPreview ? 'block' : 'none';
+                }
+            },
+            
+            /**
+             * 更新状态显示
+             */
+            updateStatus(status, text) {
+                const indicator = this.elements.statusIndicator;
+                const statusText = this.elements.statusText;
+                
+                indicator.classList.remove('online', 'offline', 'warning');
+                indicator.classList.add(status);
+                statusText.textContent = text;
+            },
+            
+            /**
+             * 获取当前注视点坐标
+             * @returns {Object} {x, y} 屏幕坐标
+             */
+            getGazePoint() {
+                return {
+                    x: this.gazePoint.x,
+                    y: this.gazePoint.y,
+                    confidence: this.confidence,
+                    timestamp: Date.now()
+                };
+            },
+            
+            /**
+             * 将屏幕坐标转换为元素相对坐标
+             * @param {HTMLElement} element 目标元素
+             * @returns {Object} {x, y} 相对坐标
+             */
+            getRelativeGazePoint(element) {
+                const rect = element.getBoundingClientRect();
+                const gaze = this.getGazePoint();
+                
+                return {
+                    x: gaze.x - rect.left,
+                    y: gaze.y - rect.top,
+                    isInside: gaze.x >= rect.left && gaze.x <= rect.right &&
+                             gaze.y >= rect.top && gaze.y <= rect.bottom,
+                    confidence: gaze.confidence
+                };
+            },
+            
+            /**
+             * 检查注视点是否在元素上
+             * @param {HTMLElement} element 目标元素
+             * @returns {boolean}
+             */
+            isGazeOnElement(element) {
+                const relative = this.getRelativeGazePoint(element);
+                return relative.isInside && relative.confidence > 50;
+            },
+            
+            /**
+             * 销毁模块
+             */
+            destroy() {
+                this.stop();
+                
+                if (webgazer) {
+                    webgazer.end();
+                }
+                
+                this.isInitialized = false;
+                console.log('眼动追踪模块已销毁');
+            }
+        };
+        
+        /**
+         * ============================================
+         * 游戏集成示例 - Game Integration Demo
+         * ============================================
+         * 展示如何使用眼动追踪模块与游戏交互
+         */
+        const gameIntegration = {
+            canvas: null,
+            ctx: null,
+            enemies: [],
+            towers: [],
+            lasers: [],
+            score: 0,
+            isRunning: false,
+            
+            init() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.setupCanvas();
+                this.spawnTower();
+                this.startGameLoop();
+            },
+            
+            setupCanvas() {
+                // 设置画布实际尺寸
+                const rect = this.canvas.getBoundingClientRect();
+                this.canvas.width = rect.width;
+                this.canvas.height = rect.height;
+            },
+            
+            spawnTower() {
+                // 在底部中央放置防御塔
+                const tower = {
+                    x: this.canvas.width / 2,
+                    y: this.canvas.height - 40,
+                    width: 40,
+                    height: 40
+                };
+                this.towers.push(tower);
+            },
+            
+            startGameLoop() {
+                this.isRunning = true;
+                this.gameLoop();
+            },
+            
+            gameLoop() {
+                if (!this.isRunning) return;
+                
+                this.update();
+                this.render();
+                
+                requestAnimationFrame(() => this.gameLoop());
+            },
+            
+            update() {
+                // 获取当前注视点
+                const gaze = eyeTrackingModule.getGazePoint();
+                
+                // 如果置信度足够高，更新激光瞄准
+                if (gaze.confidence > 50) {
+                    const relative = eyeTrackingModule.getRelativeGazePoint(this.canvas);
+                    if (relative.isInside) {
+                        // 激光击中效果可以在这里处理
+                        this.checkLaserHit(relative.x, relative.y);
+                    }
+                }
+            },
+            
+            checkLaserHit(x, y) {
+                // 这里可以实现击中检测逻辑
+                // 例如：检测是否击中敌人、触发特效等
+            },
+            
+            render() {
+                // 清空画布
+                const ctx = this.canvas.getContext('2d');
+                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // 绘制防御塔
+                this.towers.forEach(tower => {
+                    this.drawTower(ctx, tower);
+                });
+            },
+            
+            drawTower(ctx, tower) {
+                // 塔身
+                ctx.fillStyle = '#4a90d9';
+                ctx.fillRect(tower.x - 20, tower.y - 20, 40, 40);
+                
+                // 塔顶装饰
+                ctx.fillStyle = '#00ffff';
+                ctx.beginPath();
+                ctx.arc(tower.x, tower.y - 25, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 发光效果
+                ctx.shadowColor = '#00ffff';
+                ctx.shadowBlur = 20;
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(tower.x - 22, tower.y - 22, 44, 44);
+                ctx.shadowBlur = 0;
+            }
+        };
+        
+        /**
+         * ============================================
+         * 初始化
+         * ============================================
+         */
+        document.addEventListener('DOMContentLoaded', () => {
+            // 初始化眼动追踪模块
+            eyeTrackingModule.init();
+            
+            // 初始化游戏集成（可选）
+            // gameIntegration.init();
+        });
+        
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            eyeTrackingModule.destroy();
+        });
+    </script>
+</body>
+</html>

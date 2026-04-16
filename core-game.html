@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>眼动塔防 - Eye Tower Defense</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0a0a1a;
+            overflow: hidden;
+            touch-action: none;
+            font-family: Arial, sans-serif;
+        }
+        #gameCanvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            pointer-events: none;
+        }
+        #aimIndicator {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #0ff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui"></div>
+    <div id="aimIndicator"></div>
+
+    <script>
+        // ==================== 游戏状态 ====================
+        const GameState = {
+            MENU: 0,
+            PLAYING: 1,
+            GAME_OVER: 2
+        };
+
+        // ==================== 向量类 ====================
+        class Vector2 {
+            constructor(x = 0, y = 0) {
+                this.x = x;
+                this.y = y;
+            }
+
+            add(v) {
+                return new Vector2(this.x + v.x, this.y + v.y);
+            }
+
+            sub(v) {
+                return new Vector2(this.x - v.x, this.y - v.y);
+            }
+
+            mult(n) {
+                return new Vector2(this.x * n, this.y * n);
+            }
+
+            mag() {
+                return Math.sqrt(this.x * this.x + this.y * this.y);
+            }
+
+            normalize() {
+                const m = this.mag();
+                if (m === 0) return new Vector2(0, 0);
+                return new Vector2(this.x / m, this.y / m);
+            }
+
+            dist(v) {
+                return this.sub(v).mag();
+            }
+
+            copy() {
+                return new Vector2(this.x, this.y);
+            }
+        }
+
+        // ==================== 实体基类 ====================
+        class Entity {
+            constructor(x, y, radius = 10) {
+                this.position = new Vector2(x, y);
+                this.velocity = new Vector2(0, 0);
+                this.radius = radius;
+                this.active = true;
+                this.color = '#fff';
+            }
+
+            update(dt) {
+                this.position = this.position.add(this.velocity.mult(dt));
+            }
+
+            draw(ctx) {
+                // 基类不提供绘制
+            }
+
+            getBounds() {
+                return {
+                    x: this.position.x - this.radius,
+                    y: this.position.y - this.radius,
+                    width: this.radius * 2,
+                    height: this.radius * 2
+                };
+            }
+        }
+
+        // ==================== 玩家类（猫头） ====================
+        class Player extends Entity {
+            constructor(x, y) {
+                super(x, y, 25);
+                this.maxHealth = 100;
+                this.health = this.maxHealth;
+                this.color = '#ff9900'; // 橘黄色猫头
+                this.aimPoint = new Vector2(x, y - 100);
+                this.fireCooldown = 0;
+                this.fireRate = 0.3; // 秒/发
+                this.damage = 25;
+                this.earsAngle = 0;
+                this.blinkTimer = 0;
+                this.isBlinking = false;
+            }
+
+            aimAt(x, y) {
+                this.aimPoint = new Vector2(x, y);
+            }
+
+            fire() {
+                if (this.fireCooldown <= 0) {
+                    this.fireCooldown = this.fireRate;
+                    const direction = this.aimPoint.sub(this.position).normalize();
+                    const laserStart = this.position.add(direction.mult(this.radius + 5));
+                    return new Laser(
+                        laserStart.x, 
+                        laserStart.y, 
+                        this.aimPoint.x, 
+                        this.aimPoint.y, 
+                        this.damage
+                    );
+                }
+                return null;
+            }
+
+            takeDamage(amount) {
+                this.health = Math.max(0, this.health - amount);
+                if (this.health <= 0) {
+                    this.active = false;
+                }
+            }
+
+            update(dt) {
+                super.update(dt);
+                
+                // 更新射击冷却
+                if (this.fireCooldown > 0) {
+                    this.fireCooldown -= dt;
+                }
+
+                // 耳朵动画
+                this.earsAngle = Math.sin(Date.now() * 0.003) * 0.1;
+
+                // 眨眼动画
+                this.blinkTimer += dt;
+                if (this.blinkTimer > 3) {
+                    this.isBlinking = true;
+                    if (this.blinkTimer > 3.15) {
+                        this.isBlinking = false;
+                        this.blinkTimer = 0;
+                    }
+                }
+            }
+
+            draw(ctx) {
+                const x = this.position.x;
+                const y = this.position.y;
+                const r = this.radius;
+
+                ctx.save();
+
+                // 阴影
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(x, y + r - 5, r * 0.8, r * 0.3, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 左耳
+                ctx.save();
+                ctx.translate(x - r * 0.6, y - r * 0.5);
+                ctx.rotate(this.earsAngle - 0.2);
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(-r * 0.4, -r * 0.8);
+                ctx.lineTo(r * 0.2, -r * 0.2);
+                ctx.fill();
+                // 耳内
+                ctx.fillStyle = '#ffcc80';
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.1, -r * 0.2);
+                ctx.lineTo(-r * 0.25, -r * 0.5);
+                ctx.lineTo(0, -r * 0.3);
+                ctx.fill();
+                ctx.restore();
+
+                // 右耳
+                ctx.save();
+                ctx.translate(x + r * 0.6, y - r * 0.5);
+                ctx.rotate(-this.earsAngle + 0.2);
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(r * 0.4, -r * 0.8);
+                ctx.lineTo(-r * 0.2, -r * 0.2);
+                ctx.fill();
+                // 耳内
+                ctx.fillStyle = '#ffcc80';
+                ctx.beginPath();
+                ctx.moveTo(r * 0.1, -r * 0.2);
+                ctx.lineTo(r * 0.25, -r * 0.5);
+                ctx.lineTo(0, -r * 0.3);
+                ctx.fill();
+                ctx.restore();
+
+                // 身体（圆形猫头）
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 脸部纹理
+                ctx.fillStyle = '#ffcc80';
+                ctx.beginPath();
+                ctx.ellipse(x, y + r * 0.2, r * 0.5, r * 0.3, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 眼睛
+                if (this.isBlinking) {
+                    // 闭眼
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x - r * 0.35, y - r * 0.1);
+                    ctx.lineTo(x - r * 0.15, y - r * 0.05);
+                    ctx.moveTo(x + r * 0.15, y - r * 0.05);
+                    ctx.lineTo(x + r * 0.35, y - r * 0.1);
+                    ctx.stroke();
+                } else {
+                    // 睁眼
+                    ctx.fillStyle = '#333';
+                    ctx.beginPath();
+                    ctx.arc(x - r * 0.25, y - r * 0.1, r * 0.15, 0, Math.PI * 2);
+                    ctx.arc(x + r * 0.25, y - r * 0.1, r * 0.15, 0, Math.PI * 2);
+                    ctx.fill();
+                    // 高光
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(x - r * 0.22, y - r * 0.13, r * 0.05, 0, Math.PI * 2);
+                    ctx.arc(x + r * 0.28, y - r * 0.13, r * 0.05, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 鼻子
+                ctx.fillStyle = '#ff6b6b';
+                ctx.beginPath();
+                ctx.moveTo(x, y + r * 0.1);
+                ctx.lineTo(x - r * 0.08, y + r * 0.2);
+                ctx.lineTo(x + r * 0.08, y + r * 0.2);
+                ctx.fill();
+
+                // 胡须
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                // 左边
+                ctx.moveTo(x - r * 0.4, y + r * 0.15);
+                ctx.lineTo(x - r * 0.7, y + r * 0.1);
+                ctx.moveTo(x - r * 0.4, y + r * 0.25);
+                ctx.lineTo(x - r * 0.7, y + r * 0.3);
+                // 右边
+                ctx.moveTo(x + r * 0.4, y + r * 0.15);
+                ctx.lineTo(x + r * 0.7, y + r * 0.1);
+                ctx.moveTo(x + r * 0.4, y + r * 0.25);
+                ctx.lineTo(x + r * 0.7, y + r * 0.3);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        // ==================== 敌人类 ====================
+        class Enemy extends Entity {
+            constructor(x, y, type) {
+                super(x, y, 15);
+                this.type = type; // 'melee' 或 'ranged'
+                this.maxHealth = type === 'melee' ? 50 : 30;
+                this.health = this.maxHealth;
+                this.speed = type === 'melee' ? 80 : 60;
+                this.color = type === 'melee' ? '#ff3333' : '#3366ff';
+                this.attackRange = type === 'melee' ? 30 : 200;
+                this.attackCooldown = 0;
+                this.attackRate = type === 'melee' ? 1.0 : 2.0;
+                this.damage = type === 'melee' ? 10 : 8;
+                this.animationFrame = 0;
+            }
+
+            update(dt, player) {
+                super.update(dt);
+
+                // 计算到玩家的距离
+                const dist = this.position.dist(player.position);
+                const direction = player.position.sub(this.position).normalize();
+
+                // 更新动画
+                this.animationFrame += dt * 8;
+
+                if (dist > this.attackRange) {
+                    // 向玩家移动
+                    this.velocity = direction.mult(this.speed);
+                } else {
+                    // 在攻击范围内，停止移动并攻击
+                    this.velocity = new Vector2(0, 0);
+                    this.attack(player);
+                }
+
+                // 更新攻击冷却
+                if (this.attackCooldown > 0) {
+                    this.attackCooldown -= dt;
+                }
+            }
+
+            attack(player) {
+                if (this.attackCooldown <= 0) {
+                    this.attackCooldown = this.attackRate;
+                    
+                    if (this.type === 'melee') {
+                        // 近战直接伤害
+                        player.takeDamage(this.damage);
+                        game.spawnDamageText(player.position.x, player.position.y - 20, this.damage, '#ff0000');
+                    } else {
+                        // 远程发射子弹
+                        const bullet = new Bullet(
+                            this.position.x, 
+                            this.position.y, 
+                            player.position.x, 
+                            player.position.y, 
+                            this.damage,
+                            'enemy'
+                        );
+                        game.bullets.push(bullet);
+                    }
+                }
+            }
+
+            takeDamage(amount) {
+                this.health = Math.max(0, this.health - amount);
+                if (this.health <= 0) {
+                    this.active = false;
+                }
+            }
+
+            draw(ctx) {
+                const x = this.position.x;
+                const y = this.position.y;
+                const r = this.radius;
+
+                ctx.save();
+
+                // 敌人身体
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(x, y + Math.sin(this.animationFrame) * 2, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 敌人特征
+                if (this.type === 'melee') {
+                    // 近战敌人 - 尖刺
+                    ctx.fillStyle = '#cc0000';
+                    for (let i = 0; i < 4; i++) {
+                        const angle = (Math.PI / 2) * i + this.animationFrame * 0.5;
+                        const sx = x + Math.cos(angle) * r * 0.7;
+                        const sy = y + Math.sin(this.animationFrame) * 2 + Math.sin(angle) * r * 0.7;
+                        ctx.beginPath();
+                        ctx.arc(sx, sy, r * 0.25, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } else {
+                    // 远程敌人 - 瞄准镜
+                    ctx.fillStyle = '#00ccff';
+                    ctx.beginPath();
+                    ctx.arc(x, y + Math.sin(this.animationFrame) * 2, r * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // 瞄准线
+                    ctx.strokeStyle = '#00ccff';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x + r * 1.5, y);
+                    ctx.stroke();
+                }
+
+                // 血条
+                const barWidth = r * 2;
+                const barHeight = 4;
+                const healthPercent = this.health / this.maxHealth;
+                
+                ctx.fillStyle = '#333';
+                ctx.fillRect(x - barWidth/2, y - r - 10, barWidth, barHeight);
+                
+                ctx.fillStyle = healthPercent > 0.5 ? '#0f0' : healthPercent > 0.25 ? '#ff0' : '#f00';
+                ctx.fillRect(x - barWidth/2, y - r - 10, barWidth * healthPercent, barHeight);
+
+                ctx.restore();
+            }
+        }
+
+        // ==================== 激光类 ====================
+        class Laser extends Entity {
+            constructor(startX, startY, endX, endY, damage) {
+                super(startX, startY, 0);
+                this.start = new Vector2(startX, startY);
+                this.end = new Vector2(endX, endY);
+                this.damage = damage;
+                this.lifetime = 0.1; // 激光显示时间
+                this.maxLifetime = 0.1;
+                this.hasHit = false;
+            }
+
+            update(dt) {
+                this.lifetime -= dt;
+                if (this.lifetime <= 0) {
+                    this.active = false;
+                }
+            }
+
+            checkHit(enemy) {
+                if (this.hasHit) return false;
+                
+                // 计算线段到圆心的距离
+                const d = this.end.sub(this.start);
+                const f = this.start.sub(enemy.position);
+                const a = d.dot(d);
+                const b = 2 * f.dot(d);
+                const c = f.dot(f) - enemy.radius * enemy.radius;
+                
+                let discriminant = b * b - 4 * a * c;
+                
+                if (discriminant < 0) return false;
+                
+                discriminant = Math.sqrt(discriminant);
+                const t1 = (-b - discriminant) / (2 * a);
+                const t2 = (-b + discriminant) / (2 * a);
+                
+                if ((t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1)) {
+                    this.hasHit = true;
+                    return true;
+                }
+                
+                return false;
+            }
+
+            dot(v) {
+                return this.x * v.x + this.y * v.y;
+            }
+
+            draw(ctx) {
+                const alpha = this.lifetime / this.maxLifetime;
+                
+                ctx.save();
+                
+                // 激光主体
+                ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(this.start.x, this.start.y);
+                ctx.lineTo(this.end.x, this.end.y);
+                ctx.stroke();
+                
+                // 激光光晕
+                ctx.strokeStyle = `rgba(0, 255, 255, ${alpha * 0.5})`;
+                ctx.lineWidth = 8;
+                ctx.beginPath();
+                ctx.moveTo(this.start.x, this.start.y);
+                ctx.lineTo(this.end.x, this.end.y);
+                ctx.stroke();
+                
+                // 击中点特效
+                if (this.hasHit) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(this.end.x, this.end.y, 10 * (1 - alpha), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            }
+        }
+
+        // ==================== 子弹类 ====================
+        class Bullet extends Entity {
+            constructor(startX, startY, targetX, targetY, damage, owner) {
+                super(startX, startY, 5);
+                this.owner = owner; // 'player' 或 'enemy'
+                this.damage = damage;
+                this.color = owner === 'player' ? '#ffff00' : '#ff00ff';
+                
+                // 计算速度方向
+                const direction = new Vector2(targetX - startX, targetY - startY).normalize();
+                const speed = owner === 'player' ? 600 : 400;
+                this.velocity = direction.mult(speed);
+                
+                this.maxLifetime = 3;
+                this.lifetime = this.maxLifetime;
+                this.trail = []; // 轨迹点
+            }
+
+            update(dt) {
+                super.update(dt);
+                this.lifetime -= dt;
+                
+                // 记录轨迹
+                this.trail.push(this.position.copy());
+                if (this.trail.length > 10) {
+                    this.trail.shift();
+                }
+                
+                if (this.lifetime <= 0) {
+                    this.active = false;
+                }
+            }
+
+            checkHit(target) {
+                if (!target.active) return false;
+                const dist = this.position.dist(target.position);
+                if (dist < this.radius + target.radius) {
+                    this.active = false;
+                    return true;
+                }
+                return false;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                
+                // 绘制轨迹
+                if (this.trail.length > 1) {
+                    ctx.strokeStyle = this.color + '40';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) {
+                        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                    }
+                    ctx.stroke();
+                }
+                
+                // 绘制子弹本体
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 发光效果
+                ctx.fillStyle = this.color + '60';
+                ctx.beginPath();
+                ctx.arc(this.position.x, this.position.y, this.radius * 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        }
+
+        // ==================== 伤害数字类 ====================
+        class DamageText {
+            constructor(x, y, damage, color) {
+                this.position = new Vector2(x, y);
+                this.damage = damage;
+                this.color = color;
+                this.velocity = new Vector2(0, -50);
+                this.lifetime = 1;
+                this.maxLifetime = 1;
+            }
+
+            update(dt) {
+                this.position = this.position.add(this.velocity.mult(dt));
+                this.lifetime -= dt;
+            }
+
+            draw(ctx) {
+                const alpha = this.lifetime / this.maxLifetime;
+                ctx.save();
+                ctx.fillStyle = this.color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.damage, this.position.x, this.position.y);
+                ctx.restore();
+            }
+        }
+
+        // ==================== 粒子效果类 ====================
+        class Particle {
+            constructor(x, y, color, speed = 100) {
+                this.position = new Vector2(x, y);
+                const angle = Math.random() * Math.PI * 2;
+                const velocity = Math.random() * speed + 50;
+                this.velocity = new Vector2(
+                    Math.cos(angle) * velocity,
+                    Math.sin(angle) * velocity
+                );
+                this.color = color;
+                this.lifetime = 0.5 + Math.random() * 0.5;
+                this.maxLifetime = this.lifetime;
+                this.size = 2 + Math.random() * 4;
+            }
+
+            update(dt) {
+                this.position = this.position.add(this.velocity.mult(dt));
+                this.velocity = this.velocity.mult(0.98); // 阻力
+                this.lifetime -= dt;
+            }
+
+            draw(ctx) {
+                const alpha = this.lifetime / this.maxLifetime;
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.position.x, this.position.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // ==================== 游戏主类 ====================
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.ui = document.getElementById('ui');
+                this.aimIndicator = document.getElementById('aimIndicator');
+                
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+
+                this.state = GameState.MENU;
+                this.score = 0;
+                this.wave = 1;
+                this.lastTime = 0;
+                
+                // 游戏实体
+                this.player = new Player(this.canvas.width / 2, this.canvas.height - 100);
+                this.enemies = [];
+                this.lasers = [];
+                this.bullets = [];
+                this.damageTexts = [];
+                this.particles = [];
+                
+                // 生成控制
+                this.spawnTimer = 0;
+                this.spawnRate = 3; // 秒
+                this.maxEnemies = 5;
+
+                // 眼动瞄准点
+                this.aimPoint = new Vector2(this.canvas.width / 2, this.canvas.height / 2);
+                this.isAiming = false;
+
+                // 绑定事件
+                this.bindEvents();
+
+                // 开始游戏循环
+                requestAnimationFrame((t) => this.loop(t));
+            }
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                if (this.player) {
+                    this.player.position.x = Math.min(this.player.position.x, this.canvas.width);
+                    this.player.position.y = this.canvas.height - 100;
+                }
+            }
+
+            bindEvents() {
+                // 鼠标/触摸点击发射
+                const fire = (e) => {
+                    if (this.state === GameState.PLAYING) {
+                        const laser = this.player.fire();
+                        if (laser) {
+                            this.lasers.push(laser);
+                        }
+                    }
+                };
+
+                this.canvas.addEventListener('mousedown', fire);
+                this.canvas.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    fire(e);
+                });
+
+                // 键盘控制（备用）
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space') {
+                        if (this.state === GameState.MENU) {
+                            this.startGame();
+                        } else if (this.state === GameState.GAME_OVER) {
+                            this.restartGame();
+                        }
+                    }
+                });
+            }
+
+            startGame() {
+                this.state = GameState.PLAYING;
+                this.score = 0;
+                this.wave = 1;
+                this.enemies = [];
+                this.lasers = [];
+                this.bullets = [];
+                this.damageTexts = [];
+                this.particles = [];
+                this.player = new Player(this.canvas.width / 2, this.canvas.height - 100);
+                this.spawnTimer = 0;
+                this.spawnRate = 3;
+                this.maxEnemies = 5;
+            }
+
+            restartGame() {
+                this.startGame();
+            }
+
+            gameOver() {
+                this.state = GameState.GAME_OVER;
+            }
+
+            spawnEnemy() {
+                if (this.enemies.length >= this.maxEnemies) return;
+
+                const side = Math.random() < 0.5 ? 'left' : 'right';
+                const x = side === 'left' ? -30 : this.canvas.width + 30;
+                const y = this.canvas.height - 100 - Math.random() * 100;
+                const type = Math.random() < 0.6 ? 'melee' : 'ranged';
+
+                this.enemies.push(new Enemy(x, y, type));
+            }
+
+            spawnParticles(x, y, color, count = 10) {
+                for (let i = 0; i < count; i++) {
+                    this.particles.push(new Particle(x, y, color));
+                }
+            }
+
+            spawnDamageText(x, y, damage, color) {
+                this.damageTexts.push(new DamageText(x, y, damage, color));
+            }
+
+            update(dt) {
+                if (this.state !== GameState.PLAYING) return;
+
+                // 更新玩家
+                this.player.aimAt(this.aimPoint.x, this.aimPoint.y);
+                this.player.update(dt);
+
+                // 更新瞄准指示器
+                if (this.isAiming) {
+                    this.aimIndicator.style.display = 'block';
+                    this.aimIndicator.style.left = this.aimPoint.x + 'px';
+                    this.aimIndicator.style.top = this.aimPoint.y + 'px';
+                } else {
+                    this.aimIndicator.style.display = 'none';
+                }
+
+                // 生成敌人
+                this.spawnTimer += dt;
+                if (this.spawnTimer >= this.spawnRate) {
+                    this.spawnEnemy();
+                    this.spawnTimer = 0;
+                }
+
+                // 更新敌人
+                for (let i = this.enemies.length - 1; i >= 0; i--) {
+                    const enemy = this.enemies[i];
+                    enemy.update(dt, this.player);
+
+                    if (!enemy.active) {
+                        // 敌人死亡
+                        this.spawnParticles(enemy.position.x, enemy.position.y, enemy.color, 20);
+                        this.score += enemy.type === 'melee' ? 10 : 15;
+                        this.enemies.splice(i, 1);
+                        continue;
+                    }
+
+                    // 敌人到达玩家
+                    if (enemy.position.dist(this.player.position) < enemy.radius + this.player.radius) {
+                        // 已在attack中处理伤害
+                    }
+                }
+
+                // 更新激光
+                for (let i = this.lasers.length - 1; i >= 0; i--) {
+                    const laser = this.lasers[i];
+                    laser.update(dt);
+
+                    if (!laser.active) {
+                        this.lasers.splice(i, 1);
+                        continue;
+                    }
+
+                    // 检测激光命中敌人
+                    for (const enemy of this.enemies) {
+                        if (laser.checkHit(enemy)) {
+                            enemy.takeDamage(laser.damage);
+                            this.spawnParticles(enemy.position.x, enemy.position.y, '#00ffff', 5);
+                            this.spawnDamageText(enemy.position.x, enemy.position.y - 20, laser.damage, '#00ffff');
+                            break;
+                        }
+                    }
+                }
+
+                // 更新子弹
+                for (let i = this.bullets.length - 1; i >= 0; i--) {
+                    const bullet = this.bullets[i];
+                    bullet.update(dt);
+
+                    if (!bullet.active) {
+                        this.bullets.splice(i, 1);
+                        continue;
+                    }
+
+                    // 检测子弹碰撞
+                    if (bullet.owner === 'enemy') {
+                        if (bullet.checkHit(this.player)) {
+                            this.player.takeDamage(bullet.damage);
+                            this.spawnParticles(this.player.position.x, this.player.position.y, '#ff0000', 8);
+                            this.spawnDamageText(this.player.position.x, this.player.position.y - 30, bullet.damage, '#ff0000');
+                            this.bullets.splice(i, 1);
+                        }
+                    }
+
+                    // 子弹出界
+                    if (bullet.position.x < 0 || bullet.position.x > this.canvas.width ||
+                        bullet.position.y < 0 || bullet.position.y > this.canvas.height) {
+                        bullet.active = false;
+                    }
+                }
+
+                // 更新伤害数字
+                for (let i = this.damageTexts.length - 1; i >= 0; i--) {
+                    const text = this.damageTexts[i];
+                    text.update(dt);
+                    if (text.lifetime <= 0) {
+                        this.damageTexts.splice(i, 1);
+                    }
+                }
+
+                // 更新粒子
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const particle = this.particles[i];
+                    particle.update(dt);
+                    if (particle.lifetime <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+
+                // 检查游戏结束
+                if (this.player.health <= 0) {
+                    this.gameOver();
+                }
+
+                // 更新UI
+                this.updateUI();
+            }
+
+            updateUI() {
+                let html = '';
+                if (this.state === GameState.PLAYING) {
+                    html = `
+                        <div>生命值: ${Math.ceil(this.player.health)}/${this.player.maxHealth}</div>
+                        <div>分数: ${this.score}</div>
+                        <div>波次: ${this.wave}</div>
+                        <div>敌人: ${this.enemies.length}</div>
+                    `;
+                } else if (this.state === GameState.MENU) {
+                    html = `
+                        <div style="font-size: 24px; margin-bottom: 20px;">眼动塔防</div>
+                        <div>按空格键或点击开始游戏</div>
+                        <div style="margin-top: 10px; font-size: 12px;">
+                            眼动控制瞄准，点击发射激光<br>
+                            红色敌人：近战 | 蓝色敌人：远程
+                        </div>
+                    `;
+                } else if (this.state === GameState.GAME_OVER) {
+                    html = `
+                        <div style="font-size: 24px; margin-bottom: 20px;">游戏结束</div>
+                        <div>最终分数: ${this.score}</div>
+                        <div>存活波次: ${this.wave}</div>
+                        <div style="margin-top: 20px;">按空格键重新开始</div>
+                    `;
+                }
+                this.ui.innerHTML = html;
+            }
+
+            draw() {
+                // 清空画布
+                this.ctx.fillStyle = '#0a0a1a';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // 绘制地面
+                this.ctx.fillStyle = '#1a1a2e';
+                this.ctx.fillRect(0, this.canvas.height - 80, this.canvas.width, 80);
+                
+                // 绘制地面线条
+                this.ctx.strokeStyle = '#2a2a4e';
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, this.canvas.height - 80);
+                this.ctx.lineTo(this.canvas.width, this.canvas.height - 80);
+                this.ctx.stroke();
+
+                if (this.state === GameState.PLAYING) {
+                    // 绘制瞄准线
+                    if (this.isAiming) {
+                        this.ctx.save();
+                        this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+                        this.ctx.lineWidth = 1;
+                        this.ctx.setLineDash([5, 5]);
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(this.player.position.x, this.player.position.y);
+                        this.ctx.lineTo(this.aimPoint.x, this.aimPoint.y);
+                        this.ctx.stroke();
+                        this.ctx.restore();
+                    }
+
+                    // 绘制实体
+                    this.particles.forEach(p => p.draw(this.ctx));
+                    this.lasers.forEach(l => l.draw(this.ctx));
+                    this.bullets.forEach(b => b.draw(this.ctx));
+                    this.enemies.forEach(e => e.draw(this.ctx));
+                    this.player.draw(this.ctx);
+                    this.damageTexts.forEach(t => t.draw(this.ctx));
+                }
+            }
+
+            loop(timestamp) {
+                const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
+                this.lastTime = timestamp;
+
+                this.update(dt);
+                this.draw();
+
+                requestAnimationFrame((t) => this.loop(t));
+            }
+        }
+
+        // ==================== 眼动接口 ====================
+        window.setAimPoint = function(x, y) {
+            if (game && game.state === GameState.PLAYING) {
+                game.aimPoint = new Vector2(x, y);
+                game.isAiming = true;
+            }
+        };
+
+        // 鼠标控制（备用）
+        document.addEventListener('mousemove', (e) => {
+            if (game && game.state === GameState.PLAYING) {
+                game.aimPoint = new Vector2(e.clientX, e.clientY);
+                game.isAiming = true;
+            }
+        });
+
+        // ==================== 启动游戏 ====================
+        const game = new Game();
+
+        // 点击开始游戏
+        document.addEventListener('click', (e) => {
+            if (game.state === GameState.MENU) {
+                game.startGame();
+            }
+        });
+    </script>
+</body>
+</html>

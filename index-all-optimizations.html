@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>眼动塔防 - Eye Tower Defense (All Optimizations)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #0f0f23; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        #gameCanvas { display: block; width: 100%; height: 100%; }
+        .menu-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: linear-gradient(135deg, rgba(26,26,46,0.98) 0%, rgba(15,15,35,0.99) 100%); z-index: 200; }
+        .menu-screen.hidden { display: none !important; }
+        .game-title { font-size: clamp(28px, 8vw, 48px); font-weight: bold; color: #e94560; margin-bottom: 10px; text-shadow: 0 0 30px rgba(233, 69, 96, 0.8); }
+        .btn { padding: 12px 40px; font-size: 16px; font-weight: bold; color: white; background: linear-gradient(135deg, #e94560, #ff6b6b); border: none; border-radius: 50px; cursor: pointer; margin: 8px; }
+        .hud { position: absolute; top: 0; left: 0; width: 100%; padding: 10px 15px; display: flex; justify-content: space-between; background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent); pointer-events: none; }
+        .hud-item { display: flex; align-items: center; gap: 6px; color: white; font-size: clamp(12px, 3vw, 16px); font-weight: bold; }
+        .health-bar { width: 100px; height: 10px; background: rgba(0,0,0,0.5); border-radius: 5px; overflow: hidden; }
+        .health-fill { height: 100%; background: linear-gradient(90deg, #e94560, #ff6b6b); transition: width 0.3s; }
+        .game-over { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.92); z-index: 300; }
+        .game-over.show { display: flex; }
+        .toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 12px 25px; background: rgba(0, 0, 0, 0.9); color: white; border-radius: 8px; font-size: 14px; z-index: 10000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        .toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="mainMenu" class="menu-screen">
+        <div class="game-title">👁️ 眼动塔防 v2</div>
+        <div style="color: rgba(255,255,255,0.6); margin-bottom: 30px; text-align: center;">7大优化已完成</div>
+        <button class="btn" id="startBtn">开始游戏</button>
+    </div>
+
+    <div id="hud" class="hud" style="display: none;">
+        <div class="hud-item">
+            <span>❤️</span>
+            <div class="health-bar"><div class="health-fill" id="healthFill" style="width: 100%;"></div></div>
+        </div>
+        <div class="hud-item"><span>🏆</span><span id="scoreDisplay">0</span></div>
+        <div class="hud-item"><span>🌊</span><span id="waveDisplay">1</span></div>
+    </div>
+
+    <div id="gameOver" class="game-over">
+        <div class="game-title">游戏结束</div>
+        <div style="font-size: 24px; color: #ffd700; margin: 15px 0;">最终得分: <span id="finalScore">0</span></div>
+        <button class="btn" id="restartBtn">重新开始</button>
+        <button class="btn" id="menuBtn" style="background: linear-gradient(135deg, #4a90d9, #357abd); margin-top: 10px;">返回菜单</button>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // 向量类
+        class Vector2 {
+            constructor(x=0, y=0) { this.x=x; this.y=y; }
+            add(v) { return new Vector2(this.x+v.x, this.y+v.y); }
+            sub(v) { return new Vector2(this.x-v.x, this.y-v.y); }
+            mult(s) { return new Vector2(this.x*s, this.y*s); }
+            mag() { return Math.sqrt(this.x*this.x+this.y*this.y); }
+            normalize() { const m=this.mag(); return m>0?this.div(m):new Vector2(0,0); }
+            div(s) { return new Vector2(this.x/s, this.y/s); }
+            dist(v) { return this.sub(v).mag(); }
+            static fromAngle(a) { return new Vector2(Math.cos(a), Math.sin(a)); }
+        }
+
+        // 游戏配置
+        const CONFIG = {
+            PLAYER_MAX_HEALTH: 100,
+            LASER_DAMAGE: 10,
+            LASER_RANGE: 400,
+            ENEMY_SPAWN_RATE: 2500,
+            ENEMY_SPEED_BASE: 0.8,
+            GROUND_HEIGHT: 120
+        };
+
+        const GameState = { MENU: 'menu', PLAYING: 'playing', GAME_OVER: 'game_over' };
+
+        // 游戏状态
+        const game = {
+            canvas: null, ctx: null, state: GameState.MENU,
+            score: 0, wave: 1, entities: [], particles: [],
+            lastTime: 0, enemySpawnTimer: 0, waveTimer: 0,
+            player: null, groundY: 0
+        };
+
+        // 实体基类
+        class Entity {
+            constructor(x, y, radius=10) {
+                this.position = new Vector2(x, y);
+                this.velocity = new Vector2(0, 0);
+                this.radius = radius;
+                this.markedForDeletion = false;
+                this.alpha = 1;
+            }
+            update(deltaTime) {
+                this.position = this.position.add(this.velocity.mult(deltaTime/16));
+            }
+            draw(ctx) {}
+        }
+
+        // 粒子
+        class Particle extends Entity {
+            constructor(x, y, color, lifetime) {
+                super(x, y, 2);
+                this.color = color;
+                this.lifetime = lifetime;
+                this.maxLifetime = lifetime;
+                this.velocity = new Vector2((Math.random()-0.5)*3, (Math.random()-0.5)*3);
+            }
+            update(deltaTime) {
+                super.update(deltaTime);
+                this.lifetime -= deltaTime;
+                this.alpha = this.lifetime / this.maxLifetime;
+                if (this.lifetime <= 0) this.markedForDeletion = true;
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI*2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // 激光类
+        class Laser extends Entity {
+            constructor(x, y, endX, endY) {
+                super(x, y, 0);
+                this.start = new Vector2(x, y);
+                this.end = new Vector2(endX, endY);
+                this.lifetime = 150;
+                this.maxLifetime = 150;
+            }
+            update(deltaTime) {
+                this.lifetime -= deltaTime;
+                this.alpha = this.lifetime / this.maxLifetime;
+                if (this.lifetime <= 0) this.markedForDeletion = true;
+            }
+            draw(ctx) {
+                ctx.save();
+                const grad = ctx.createLinearGradient(this.start.x, this.start.y, this.end.x, this.end.y);
+                grad.addColorStop(0, `rgba(255,100,100,${this.alpha})`);
+                grad.addColorStop(0.5, `rgba(255,200,100,${this.alpha})`);
+                grad.addColorStop(1, `rgba(255,100,100,0)`);
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 6 * this.alpha;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(this.start.x, this.start.y);
+                ctx.lineTo(this.end.x, this.end.y);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // 敌人类
+        class Enemy extends Entity {
+            constructor(x, y, type) {
+                super(x, y, type === 'melee' ? 25 : 20);
+                this.type = type;
+                this.health = type === 'melee' ? 60 : 40;
+                this.maxHealth = this.health;
+                this.speed = type === 'melee' ? 0.5 : 0.4;
+                this.attackRange = type === 'melee' ? 45 : 180;
+                this.attackCooldown = 0;
+                this.damage = type === 'melee' ? 10 : 8;
+                this.color = type === 'melee' ? '#e94560' : '#4a90d9';
+                this.state = 'move';
+                this.animFrame = 0;
+                this.deathTimer = 0;
+            }
+            update(deltaTime) {
+                super.update(deltaTime);
+                this.animFrame += deltaTime * 0.005;
+                if (this.attackCooldown > 0) this.attackCooldown -= deltaTime;
+
+                const player = game.entities.find(e => e instanceof Player);
+                if (!player || this.state === 'die') return;
+
+                const dist = this.position.dist(player.position);
+                const dir = player.position.sub(this.position).normalize();
+
+                if (this.state === 'hit') {
+                    this.velocity = this.velocity.mult(0.9);
+                    if (Math.abs(this.velocity.x) < 0.1) this.state = 'move';
+                    return;
+                }
+
+                if (dist > this.attackRange) {
+                    this.state = 'move';
+                    this.velocity = dir.mult(this.speed);
+                    this.position.y = game.groundY - this.radius;
+                } else if (this.attackCooldown <= 0) {
+                    this.attack(player);
+                } else {
+                    this.velocity = new Vector2(0, 0);
+                }
+            }
+            attack(player) {
+                this.attackCooldown = this.type === 'melee' ? 1200 : 2000;
+                player.takeDamage(this.damage);
+                for (let i = 0; i < 5; i++) {
+                    game.particles.push(new Particle(
+                        player.position.x + (Math.random()-0.5)*30,
+                        player.position.y + (Math.random()-0.5)*30,
+                        '#ff3333', 300
+                    ));
+                }
+            }
+            takeDamage(amount) {
+                this.health -= amount;
+                for (let i = 0; i < 5; i++) {
+                    game.particles.push(new Particle(
+                        this.position.x + (Math.random()-0.5)*30,
+                        this.position.y + (Math.random()-0.5)*30,
+                        '#ffaa00', 250
+                    ));
+                }
+                if (this.health <= 0) {
+                    this.state = 'die';
+                    game.score += this.type === 'melee' ? 100 : 150;
+                } else {
+                    this.state = 'hit';
+                    this.velocity = new Vector2(-Math.sign(this.velocity.x || 1) * 3, 0);
+                }
+            }
+            draw(ctx) {
+                if (this.state === 'die') {
+                    this.deathTimer += 16;
+                    const alpha = Math.max(0, 1 - this.deathTimer / 800);
+                    if (alpha <= 0) { this.markedForDeletion = true; return; }
+                    ctx.save();
+                    ctx.globalAlpha = alpha;
+                    if (Math.floor(this.deathTimer / 100) % 2 === 0) ctx.globalAlpha = alpha * 0.5;
+                    ctx.translate(this.position.x, this.position.y + 10);
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, this.radius * 1.2, this.radius * 0.5, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#1a1a2e';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(-8, -5); ctx.lineTo(-2, 1);
+                    ctx.moveTo(-2, -5); ctx.lineTo(-8, 1);
+                    ctx.moveTo(2, -5); ctx.lineTo(8, 1);
+                    ctx.moveTo(8, -5); ctx.lineTo(2, 1);
+                    ctx.stroke();
+                    ctx.restore();
+                    return;
+                }
+                ctx.save();
+                ctx.translate(this.position.x, this.position.y);
+                const bob = this.state === 'move' ? Math.sin(this.animFrame * 8) * 3 : 0;
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(0, this.radius * 0.5 - bob, this.radius * 0.8, this.radius * 0.25, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.translate(0, -bob);
+                const grad = ctx.createRadialGradient(-5, -5, 0, 0, 0, this.radius);
+                grad.addColorStop(0, this.color);
+                grad.addColorStop(1, this.darkenColor(this.color, 40));
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                if (this.type === 'melee') ctx.roundRect(-this.radius, -this.radius, this.radius * 2, this.radius * 2, 8);
+                else ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = this.darkenColor(this.color, 60);
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                const player = game.entities.find(e => e instanceof Player);
+                let lookAngle = 0;
+                if (player) lookAngle = Math.atan2(player.position.y - this.position.y, player.position.x - this.position.x);
+                const eyeOff = this.type === 'melee' ? 6 : 8;
+                const px = Math.cos(lookAngle) * 2;
+                const py = Math.sin(lookAngle) * 2;
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(-eyeOff, -4, 5, 0, Math.PI * 2);
+                ctx.arc(eyeOff, -4, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#1a1a2e';
+                ctx.beginPath();
+                ctx.arc(-eyeOff + px, -4 + py, 2.5, 0, Math.PI * 2);
+                ctx.arc(eyeOff + px, -4 + py, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                if (this.health < this.maxHealth) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                    ctx.fillRect(-20, -this.radius - 10, 40, 4);
+                    ctx.fillStyle = this.health > this.maxHealth * 0.5 ? '#4ade80' : this.health > this.maxHealth * 0.25 ? '#fbbf24' : '#ef4444';
+                    ctx.fillRect(-20, -this.radius - 10, 40 * (this.health / this.maxHealth), 4);
+                }
+                ctx.restore();
+            }
+            darkenColor(color, percent) {
+                const num = parseInt(color.replace('#', ''), 16);
+                const amt = Math.round(2.55 * percent);
+                const R = Math.max((num >> 16) - amt, 0);
+                const G = Math.max((num >> 8 & 0x00FF) - amt, 0);
+                const B = Math.max((num & 0x0000FF) - amt, 0);
+                return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+            }
+        }
+
+        // 玩家类
+        class Player extends Entity {
+            constructor(x, y) {
+                super(x, y, 30);
+                this.health = CONFIG.PLAYER_MAX_HEALTH;
+                this.maxHealth = CONFIG.PLAYER_MAX_HEALTH;
+                this.aimAngle = -Math.PI / 2;
+                this.fireCooldown = 0;
+                this.blinkTimer = 0;
+                this.isBlinking = false;
+            }
+            update(deltaTime) {
+                super.update(deltaTime);
+                if (this.fireCooldown > 0) this.fireCooldown -= deltaTime;
+                this.blinkTimer += deltaTime;
+                if (this.blinkTimer > 3000) {
+                    this.isBlinking = true;
+                    if (this.blinkTimer > 3200) { this.isBlinking = false; this.blinkTimer = 0; }
+                }
+                if (this.fireCooldown <= 0 && this.findTarget()) this.fire();
+            }
+            aimAt(x, y) { this.aimAngle = Math.atan2(y - this.position.y, x - this.position.x); }
+            findTarget() {
+                for (const e of game.entities) {
+                    if (e instanceof Enemy && e.state !== 'die') {
+                        const dist = this.position.dist(e.position);
+                        if (dist < CONFIG.LASER_RANGE) {
+                            const angle = Math.atan2(e.position.y - this.position.y, e.position.x - this.position.x);
+                            const diff = Math.abs(angle - this.aimAngle);
+                            if (diff < 0.5 || diff > Math.PI * 2 - 0.5) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            fire() {
+                if (this.fireCooldown > 0) return;
+                this.fireCooldown = 250;
+                const start = this.position.add(Vector2.fromAngle(this.aimAngle).mult(this.radius));
+                const end = start.add(Vector2.fromAngle(this.aimAngle).mult(CONFIG.LASER_RANGE));
+                game.entities.push(new Laser(start.x, start.y, end.x, end.y));
+                for (let i = 0; i < 5; i++) game.particles.push(new Particle(start.x, start.y, '#ffaa00', 300));
+            }
+            takeDamage(amount) {
+                this.health = Math.max(0, this.health - amount);
+                for (let i = 0; i < 10; i++) game.particles.push(new Particle(this.position.x + (Math.random() - 0.5) * 40, this.position.y + (Math.random() - 0.5) * 40, '#ff0000', 400));
+                if (this.health <= 0) gameOver();
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(this.position.x, this.position.y + 25, 25, 8, 0, 0, Math.PI*2);
+                ctx.fill();
+                const grad = ctx.createRadialGradient(this.position.x-5, this.position.y-5, 0, this.position.x, this.position.y, 30);
+                grad.addColorStop(0, '#6b7280');
+                grad.addColorStop(1, '#374151');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(this.position.x, this.position.y, 30, 0, Math.PI*2);
+                ctx.fill();
+                ctx.strokeStyle = '#1f2937';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = '#4b5563';
+                ctx.beginPath();
+                ctx.moveTo(this.position.x-15, this.position.y-20);
+                ctx.lineTo(this.position.x-22, this.position.y-38);
+                ctx.lineTo(this.position.x-8, this.position.y-28);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(this.position.x+15, this.position.y-20);
+                ctx.lineTo(this.position.x+22, this.position.y-38);
+                ctx.lineTo(this.position.x+8, this.position.y-28);
+                ctx.fill();
+                if (!this.isBlinking) {
+                    const eyeX = Math.cos(this.aimAngle) * 3;
+                    const eyeY = Math.sin(this.aimAngle) * 3;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(this.position.x-10, this.position.y-5, 8, 0, Math.PI*2);
+                    ctx.arc(this.position.x+10, this.position.y-5, 8, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.fillStyle = '#1f2937';
+                    ctx.beginPath();
+                    ctx.arc(this.position.x-10+eyeX, this.position.y-5+eyeY, 4, 0, Math.PI*2);
+                    ctx.arc(this.position.x+10+eyeX, this.position.y-5+eyeY, 4, 0, Math.PI*2);
+                    ctx.fill();
+                } else {
+                    ctx.strokeStyle = '#1f2937';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.position.x-16, this.position.y-5);
+                    ctx.lineTo(this.position.x-4, this.position.y-5);
+                    ctx.moveTo(this.position.x+4, this.position.y-5);
+                    ctx.lineTo(this.position.x+16, this.position.y-5);
+                    ctx.stroke();
+                }
+                ctx.fillStyle = '#f472b6';
+                ctx.beginPath();
+                ctx.moveTo(this.position.x, this.position.y+3);
+                ctx.lineTo(this.position.x-4, this.position.y+10);
+                ctx.lineTo(this.position.x+4, this.position.y+10);
+                ctx.fill();
+                ctx.strokeStyle = '#6b7280';
+                ctx.lineWidth = 1.5;
+                for (let i = 0; i < 3; i++) {
+                    const y = this.position.y + 5 + i * 4;
+                    ctx.beginPath();
+                    ctx.moveTo(this.position.x - 20, y);
+                    ctx.lineTo(this.position.x - 45, y - 5 + i * 2);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(this.position.x + 20, y);
+                    ctx.lineTo(this.position.x + 45, y - 5 + i * 2);
+                    ctx.stroke();
+                }
+                if (this.health < this.maxHealth * 0.3) {
+                    ctx.fillStyle = `rgba(255, 0, 0, ${0.2 + Math.sin(Date.now() / 100) * 0.1})`;
+                    ctx.beginPath();
+                    ctx.arc(this.position.x, this.position.y, this.radius + 8, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        // 游戏主函数
+        function init() {
+            game.canvas = document.getElementById('gameCanvas');
+            game.ctx = game.canvas.getContext('2d');
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            bindEvents();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resizeCanvas() {
+            game.canvas.width = window.innerWidth;
+            game.canvas.height = window.innerHeight;
+            game.groundY = game.canvas.height - CONFIG.GROUND_HEIGHT;
+        }
+
+        function bindEvents() {
+            document.getElementById('startBtn').addEventListener('click', startGame);
+            document.getElementById('restartBtn').addEventListener('click', restartGame);
+            document.getElementById('menuBtn').addEventListener('click', backToMenu);
+            game.canvas.addEventListener('mousemove', (e) => {
+                if (game.state === GameState.PLAYING && game.player) {
+                    game.player.aimAt(e.clientX, e.clientY);
+                }
+            });
+            game.canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (game.state === GameState.PLAYING && game.player) {
+                    const touch = e.touches[0];
+                    game.player.aimAt(touch.clientX, touch.clientY);
+                }
+            }, { passive: false });
+        }
+
+        function startGame() {
+            game.state = GameState.PLAYING;
+            game.score = 0;
+            game.wave = 1;
+            game.entities = [];
+            game.particles = [];
+            game.enemySpawnTimer = 0;
+            game.waveTimer = 0;
+            game.player = new Player(game.canvas.width / 2, game.groundY - 35);
+            game.entities.push(game.player);
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('hud').style.display = 'flex';
+            updateUI();
+            showToast('游戏开始！移动鼠标瞄准，自动攻击');
+        }
+
+        function restartGame() {
+            document.getElementById('gameOver').classList.remove('show');
+            startGame();
+        }
+
+        function backToMenu() {
+            game.state = GameState.MENU;
+            document.getElementById('gameOver').classList.remove('show');
+            document.getElementById('mainMenu').classList.remove('hidden');
+            document.getElementById('hud').style.display = 'none';
+        }
+
+        function gameOver() {
+            game.state = GameState.GAME_OVER;
+            document.getElementById('finalScore').textContent = game.score;
+            document.getElementById('gameOver').classList.add('show');
+        }
+
+        function spawnEnemy() {
+            const side = Math.random() < 0.5 ? 'left' : 'right';
+            const x = side === 'left' ? -40 : game.canvas.width + 40;
+            const type = Math.random() < 0.6 ? 'melee' : 'ranged';
+            game.entities.push(new Enemy(x, game.groundY - 28, type));
+        }
+
+        function updateUI() {
+            if (game.player) {
+                document.getElementById('healthFill').style.width = (game.player.health / game.player.maxHealth * 100) + '%';
+            }
+            document.getElementById('scoreDisplay').textContent = game.score;
+            document.getElementById('waveDisplay').textContent = game.wave;
+        }
+
+        function showToast(msg) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 2500);
+        }
+
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - game.lastTime;
+            game.lastTime = timestamp;
+            if (game.state === GameState.PLAYING) {
+                update(deltaTime);
+                render();
+                updateUI();
+            } else if (game.state === GameState.MENU) {
+                renderMenuBackground();
+            }
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update(deltaTime) {
+            game.enemySpawnTimer += deltaTime;
+            if (game.enemySpawnTimer > CONFIG.ENEMY_SPAWN_RATE) {
+                spawnEnemy();
+                game.enemySpawnTimer = 0;
+            }
+            game.waveTimer += deltaTime;
+            if (game.waveTimer > 30000) {
+                game.wave++;
+                game.waveTimer = 0;
+                showToast(`第 ${game.wave} 波！`);
+            }
+            game.entities.forEach(e => e.update(deltaTime));
+            game.particles.forEach(p => p.update(deltaTime));
+            game.entities = game.entities.filter(e => !e.markedForDeletion);
+            game.particles = game.particles.filter(p => !p.markedForDeletion);
+        }
+
+        function render() {
+            const ctx = game.ctx;
+            const w = game.canvas.width;
+            const h = game.canvas.height;
+            ctx.fillStyle = '#0f0f23';
+            ctx.fillRect(0, 0, w, h);
+            renderBackground();
+            renderGround();
+            game.particles.forEach(p => p.draw(ctx));
+            game.entities.sort((a, b) => a.position.y - b.position.y).forEach(e => e.draw(ctx));
+            if (game.player) drawAimLine(ctx);
+        }
+
+        function renderBackground() {
+            const ctx = game.ctx;
+            const w = game.canvas.width;
+            const h = game.canvas.height;
+            const grad = ctx.createLinearGradient(0, 0, 0, h);
+            grad.addColorStop(0, '#0f0f23');
+            grad.addColorStop(0.4, '#1a1a3e');
+            grad.addColorStop(0.8, '#16213e');
+            grad.addColorStop(1, '#1a3a3e');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            for (let i = 0; i < 50; i++) {
+                const x = (i * 137) % w;
+                const y = (i * 71) % (h * 0.6);
+                const size = 1 + (i % 3);
+                ctx.beginPath();
+                ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = '#0d1a2d';
+            ctx.beginPath();
+            ctx.moveTo(0, h);
+            for (let x = 0; x <= w; x += 50) {
+                const y = h - 80 - Math.sin(x * 0.01) * 30 - Math.sin(x * 0.03) * 15;
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(w, h);
+            ctx.fill();
+        }
+
+        function renderGround() {
+            const ctx = game.ctx;
+            const w = game.canvas.width;
+            const groundY = game.groundY;
+            const grad = ctx.createLinearGradient(0, groundY, 0, game.canvas.height);
+            grad.addColorStop(0, '#2d3748');
+            grad.addColorStop(0.3, '#1a202c');
+            grad.addColorStop(1, '#0d1117');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, groundY, w, game.canvas.height - groundY);
+            ctx.fillStyle = '#4a5568';
+            ctx.fillRect(0, groundY, w, 3);
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            for (let x = 0; x < w; x += 30) {
+                ctx.fillRect(x, groundY + 10 + (x % 50), 20, 4);
+            }
+        }
+
+        function drawAimLine(ctx) {
+            if (!game.player) return;
+            const start = game.player.position;
+            const angle = game.player.aimAngle;
+            const endX = start.x + Math.cos(angle) * CONFIG.LASER_RANGE;
+            const endY = start.y + Math.sin(angle) * CONFIG.LASER_RANGE;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(233, 69, 96, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(233, 69, 96, 0.5)';
+            ctx.beginPath();
+            ctx.arc(endX, endY, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(233, 69, 96, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function renderMenuBackground() {
+            const ctx = game.ctx;
+            const w = game.canvas.width;
+            const h = game.canvas.height;
+            ctx.fillStyle = '#0f0f23';
+            ctx.fillRect(0, 0, w, h);
+            renderBackground();
+        }
+
+        // 启动
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
