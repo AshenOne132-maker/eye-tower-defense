@@ -895,18 +895,21 @@
 
         function initEyeTracking() {
             console.log('[EyeDiag] initEyeTracking called, typeof webgazer=' + typeof window.webgazer + ', script=' + !!document.getElementById('wgScript'));
-            const statusEl = document.getElementById('permissionStatus');
             const overlay = document.getElementById('permissionOverlay');
             overlay.classList.remove('hidden');
             if (!eyeTracking.checkAvailable()) {
-                statusEl.innerHTML = '眼动追踪库未加载<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
+                console.error('[EyeDiag] webgazer not available');
+                updateEyeStatus(false); showToast('眼动追踪库未加载，请使用触摸/鼠标');
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.innerHTML = '当前浏览器不支持摄像头<br>将使用触摸/鼠标控制'; updateEyeStatus(false);
+                console.error('[EyeDiag] getUserMedia not supported');
+                updateEyeStatus(false); showToast('当前浏览器不支持摄像头，请使用触摸/鼠标');
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
-            statusEl.innerHTML = '眼动追踪已就绪<br>点击"允许访问"启动摄像头<br><small style="color:#999">如曾拒绝权限，请在地址栏重新允许</small>'; eyeTracking.init();
+            console.log('[EyeDiag] calling eyeTracking.init()...');
+            eyeTracking.init();
+            console.log('[EyeDiag] eyeTracking.init() done, initialized=' + eyeTracking.initialized);
         }
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
