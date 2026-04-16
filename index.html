@@ -77,14 +77,29 @@
         <button class="btn" id="menuBtn" style="background: linear-gradient(135deg, #4a90d9, #357abd); margin-top: 10px;">返回菜单</button>
     </div>
     <div id="permissionOverlay" class="permission-overlay hidden">
-        <div class="permission-icon">📷</div>
-        <div class="permission-title">启用眼动追踪</div>
-        <div class="permission-text">
-            我们需要访问摄像头来实现眼动瞄准。<br>视频仅在本地处理，不会上传。<br>您也可以拒绝，改用触摸或鼠标控制。
+        <div id="permInitial">
+            <div class="permission-icon">📷</div>
+            <div class="permission-title">启用眼动追踪</div>
+            <div class="permission-text">
+                我们需要访问摄像头来实现眼动瞄准。<br>视频仅在本地处理，不会上传。<br>您也可以拒绝，改用触摸或鼠标控制。
+            </div>
+            <button class="btn" id="allowCameraBtn">允许访问</button>
+            <button class="btn" id="denyCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563);">使用触摸/鼠标</button>
         </div>
-        <button class="btn" id="allowCameraBtn">允许访问</button>
-        <button class="btn" id="denyCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563);">使用触摸/鼠标</button>
-        <div class="permission-status" id="permissionStatus">正在初始化眼动追踪...</div>
+        <div id="permLoading" style="display:none; flex-direction:column; align-items:center;">
+            <div style="width:48px; height:48px; border:4px solid rgba(255,255,255,0.1); border-top-color:#e94560; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:20px;"></div>
+            <div class="permission-title">正在启动摄像头...</div>
+            <div class="permission-text">请允许浏览器使用摄像头，眼动模型正在加载</div>
+            <button class="btn" id="cancelCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563); margin-top:15px;">取消</button>
+        </div>
+        <div id="permError" style="display:none; flex-direction:column; align-items:center;">
+            <div class="permission-icon">⚠️</div>
+            <div class="permission-title">眼动启动失败</div>
+            <div class="permission-text" id="permErrorText" style="color:#fca5a5; margin-bottom:20px;">未知错误</div>
+            <button class="btn" id="retryCameraBtn">重试</button>
+            <button class="btn" id="denyCameraBtn2" style="background: linear-gradient(135deg, #6b7280, #4b5563); margin-top:10px;">使用触摸/鼠标</button>
+        </div>
+        <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
     </div>
     <div id="eyeStatus" class="eye-status"></div>
     <div id="controlToggle" class="control-toggle" style="display:none;">控制: 自动</div>
@@ -187,26 +202,30 @@
                 } catch (e) { console.error(e); updateEyeStatus(false); return false; }
             },
             async start() {
-                if (!this.initialized) return false;
+                if (!this.initialized) return { success: false, error: '眼动引擎未初始化，请刷新页面重试' };
                 try {
-                    showToast('正在启动眼动追踪...');
-                    await webgazer.begin();
+                    const timeoutMs = 20000;
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('眼动模型加载超时（20秒），请检查网络')), timeoutMs));
+                    await Promise.race([webgazer.begin(), timeoutPromise]);
                     this.active = true;
                     this.styleVideoPreview();
                     showToast('摄像头已启用，开始校准');
                     setTimeout(() => { this.startCalibration(); }, 600);
-                    return true;
+                    return { success: true };
                 } catch (e) { 
-                    console.error(e); 
+                    console.error('Eye tracking start failed:', e); 
                     this.ready = false; this.active = false; updateEyeStatus(false); updateControlToggle();
+                    let msg = '';
                     if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-                        showToast('摄像头权限被拒绝');
+                        msg = '摄像头权限被拒绝。请在浏览器地址栏左侧 🔒 图标中设置为"允许"。';
                     } else if (e.name === 'NotFoundError') {
-                        showToast('未找到摄像头设备');
+                        msg = '未找到摄像头设备。';
+                    } else if (e.name === 'NotReadableError' || e.name === 'AbortError') {
+                        msg = '摄像头被占用或无法读取。请关闭其他使用摄像头的标签页/应用后重试。';
                     } else {
-                        showToast('眼动模型加载失败，请检查网络');
+                        msg = (e.message || '未知错误') + '。建议连接稳定 WiFi 后重试。';
                     }
-                    return false; 
+                    return { success: false, error: msg }; 
                 }
             },
             startCalibration() {
