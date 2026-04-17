@@ -1019,18 +1019,36 @@
             const overlay = document.getElementById('orientationOverlay');
             const isLandscape = window.innerWidth > window.innerHeight;
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            if (isLandscape) {
+            if (isLandscape && isMobile) {
                 overlay.classList.add('show');
-                document.getElementById('orientationText').textContent = isMobile
-                    ? '请将设备旋转为竖屏方向，以获得最佳游戏体验。'
-                    : '请将浏览器窗口调整为竖屏比例（高度大于宽度），或使用移动设备游玩。';
                 game.isPaused = true;
             } else {
                 overlay.classList.remove('show');
                 if (game.isPaused && !headTracking.isCalibrating) game.isPaused = false;
             }
         }
-        function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; checkOrientation(); }
+        function resizeCanvas() {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            const isLandscape = w > h;
+            if (isLandscape) {
+                const targetW = h * 9 / 16;
+                game.canvas.width = targetW;
+                game.canvas.height = h;
+                game.canvas.style.width = targetW + 'px';
+                game.canvas.style.height = h + 'px';
+                game.canvas.style.margin = '0 auto';
+                game.canvas.style.display = 'block';
+            } else {
+                game.canvas.width = w;
+                game.canvas.height = h;
+                game.canvas.style.width = '100%';
+                game.canvas.style.height = '100%';
+                game.canvas.style.margin = '0';
+            }
+            game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO;
+            checkOrientation();
+        }
 
         function isMobile() {
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
