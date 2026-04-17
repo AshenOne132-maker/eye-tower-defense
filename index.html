@@ -188,6 +188,9 @@
             initialized: false, active: false, ready: false,
             gazeX: 0, gazeY: 0, smoothX: 0, smoothY: 0,
             history: [], historySize: 6,
+            suppressUntil: 0,
+            isSuppressed() { return performance.now() < this.suppressUntil; },
+            suppress(ms) { this.suppressUntil = performance.now() + ms; },
             isCalibrating: false, calibrationIndex: 0,
             calibrationPositions: [
                 {x: 10, y: 10}, {x: 50, y: 10}, {x: 90, y: 10},
@@ -406,6 +409,10 @@
             if (eyeTracking.ready && eyeTracking.active) {
                 input.mode = 'eye';
                 if (game.state === GameState.PLAYING && game.player) {
+                    if (eyeTracking.isSuppressed()) {
+                        // 点击/触摸期间忽略 gaze 数据，保持上一帧瞄准角度
+                        game.player.aimAt(game.player.eyeAimX || game.player.position.x, game.player.position.y);
+                    } else {
                     const gaze = eyeTracking.getSmoothedGaze();
                     const screenW = window.innerWidth;
                     const gazeRatioX = gaze.x / screenW;
@@ -439,6 +446,7 @@
                     if (typeof game.player.eyeAimX !== 'number') { game.player.eyeAimX = targetX; }
                     game.player.eyeAimX += (targetX - game.player.eyeAimX) * 0.32;
                     game.player.aimAt(game.player.eyeAimX, targetY);
+                    }
                 }
             } else if (input.hasTouch) {
                 input.mode = 'touch';
@@ -1109,9 +1117,15 @@
         function bindInputEvents() {
             game.canvas.addEventListener('mousemove', (e) => { input.mouseX = e.clientX; input.mouseY = e.clientY; input.hasMouse = true; });
             game.canvas.addEventListener('mouseleave', () => { input.hasMouse = false; });
-            game.canvas.addEventListener('touchstart', (e) => { input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY; }, { passive: false });
+            game.canvas.addEventListener('touchstart', (e) => {
+                if (eyeTracking.ready && eyeTracking.active) eyeTracking.suppress(150);
+                input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY;
+            }, { passive: false });
             game.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY; }, { passive: false });
             game.canvas.addEventListener('touchend', () => { input.hasTouch = false; });
+            game.canvas.addEventListener('mousedown', (e) => {
+                if (eyeTracking.ready && eyeTracking.active) eyeTracking.suppress(150);
+            });
         }
 
         function startGame() {
