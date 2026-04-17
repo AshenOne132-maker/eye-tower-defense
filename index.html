@@ -36,6 +36,8 @@
         .eye-status.active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
         .eye-status.inactive { background: #ef4444; }
         .control-toggle { position: fixed; top: 10px; right: 30px; padding: 4px 10px; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; border-radius: 12px; z-index: 4000; border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; cursor: pointer; }
+        .recalibrate-btn { position: fixed; top: 10px; right: 92px; padding: 4px 10px; background: rgba(233,69,96,0.25); color: #fff; font-size: 11px; border-radius: 12px; z-index: 4000; border: 1px solid rgba(233,69,96,0.5); pointer-events: auto; cursor: pointer; display: none; }
+        .recalibrate-btn.show { display: block; }
     
         /* 校准覆盖层 */
         .calibration-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 6000; transition: opacity 0.3s; }
@@ -104,6 +106,7 @@
     </div>
     <div id="eyeStatus" class="eye-status"></div>
     <div id="controlToggle" class="control-toggle" style="display:none;">控制: 自动</div>
+    <div id="recalibrateBtn" class="recalibrate-btn">重新校准</div>
     <div id="toast" class="toast"></div>
 
     <script>
@@ -183,6 +186,7 @@
         const eyeTracking = {
             initialized: false, active: false, ready: false,
             gazeX: 0, gazeY: 0, smoothX: 0, smoothY: 0,
+            history: [], historySize: 6,
             isCalibrating: false, calibrationIndex: 0,
             calibrationPositions: [
                 {x: 10, y: 10}, {x: 50, y: 10}, {x: 90, y: 10},
@@ -210,6 +214,7 @@
                         }
                     });
                     webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
+                    try { webgazer.applyKalmanFilter(true); } catch(e){}
                     this.styleVideoPreview(); this.initialized = true; this._initRetryCount = 0; return true;
                 } catch (e) { console.error(e); updateEyeStatus(false); return false; }
             },
@@ -244,9 +249,11 @@
             startCalibration() {
                 if (this.isCalibrating) return;
                 if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
-                this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 1;
+                this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 2;
                 this.calibrationPositions = [
-                    {x: 20, y: 20}, {x: 80, y: 20}, {x: 50, y: 50}, {x: 20, y: 80}, {x: 80, y: 80}
+                    {x: 15, y: 15}, {x: 50, y: 15}, {x: 85, y: 15},
+                    {x: 15, y: 50}, {x: 50, y: 50}, {x: 85, y: 50},
+                    {x: 15, y: 85}, {x: 50, y: 85}, {x: 85, y: 85}
                 ];
                 if (typeof webgazer !== 'undefined') {
                     try { webgazer.showVideo(false); webgazer.showFaceOverlay(false); webgazer.showFaceFeedbackBox(false); } catch(e){}
@@ -321,7 +328,10 @@
                 this.isCalibrating = false;
                 document.getElementById('calibrationOverlay').classList.add('hidden');
                 if (typeof webgazer !== 'undefined') {
-                    try { webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true); } catch(e){}
+                    try {
+                        webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
+                        webgazer.applyKalmanFilter(true);
+                    } catch(e){}
                 }
                 const wgContainer2 = document.getElementById('webgazerVideoContainer');
                 if (wgContainer2) wgContainer2.style.display = 'block';
@@ -330,6 +340,12 @@
                 updateEyeStatus(true); updateControlToggle();
                 showToast('眼动追踪已就绪！');
                 console.log('Calibration finished');
+            },
+            recalibrate() {
+                if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
+                this.ready = false;
+                showToast('开始重新校准...');
+                setTimeout(() => { this.startCalibration(); }, 400);
             },
             stop() {
                 if (typeof webgazer !== 'undefined') webgazer.end();
@@ -342,7 +358,7 @@
             styleVideoPreview() {
                 setTimeout(() => {
                     const el = document.getElementById('webgazerVideoContainer');
-                    if (el) el.style.cssText = 'position:fixed!important;top:10px!important;right:10px!important;width:100px!important;height:75px!important;border-radius:8px!important;overflow:hidden!important;border:2px solid rgba(0,255,255,0.5)!important;z-index:9999!important;';
+                    if (el) el.style.cssText = 'position:fixed!important;bottom:10px!important;right:10px!important;width:80px!important;height:60px!important;border-radius:8px!important;overflow:hidden!important;border:2px solid rgba(0,255,255,0.35)!important;z-index:9999!important;opacity:0.85!important;';
                     const feed = document.getElementById('webgazerVideoFeed');
                     if (feed) feed.style.cssText = 'width:100%!important;height:100%!important;object-fit:cover!important;';
                     const box = document.getElementById('webgazerFaceFeedbackBox');
@@ -354,12 +370,18 @@
                     const dx = this.gazeX - this.smoothX;
                     const dy = this.gazeY - this.smoothY;
                     const dist = Math.sqrt(dx*dx + dy*dy);
-                    if (dist > 25) {
-                        const t = Math.min(1, (dist - 25) / 100) * 0.12;
-                        this.smoothX += dx * t;
-                        this.smoothY += dy * t;
-                    }
+                    let t = dist < 15 ? 0.22 : (dist < 60 ? 0.14 : 0.08);
+                    this.smoothX += dx * t;
+                    this.smoothY += dy * t;
+                    this.history.push({x: this.smoothX, y: this.smoothY});
+                    if (this.history.length > this.historySize) this.history.shift();
                 }
+            },
+            getSmoothedGaze() {
+                if (this.history.length === 0) return {x: this.smoothX, y: this.smoothY};
+                let sx = 0, sy = 0;
+                for (const p of this.history) { sx += p.x; sy += p.y; }
+                return {x: sx / this.history.length, y: sy / this.history.length};
             }
         };
 
@@ -371,23 +393,24 @@
             if (eyeTracking.ready && eyeTracking.active) {
                 input.mode = 'eye';
                 if (game.state === GameState.PLAYING && game.player) {
-                    const screenW = window.innerWidth;
-                    const gazeRatioX = eyeTracking.smoothX / screenW;
-                    let targetX = game.player.position.x;
-                    const bounds = camera.getWorldBounds();
+                    const gaze = eyeTracking.getSmoothedGaze();
+                    let worldPos = camera.screenToWorld(gaze.x, gaze.y);
                     const enemies = game.entities.filter(e => (e instanceof Enemy || e instanceof Boss) && e.state !== 'die');
-                    if (gazeRatioX < 0.45) {
-                        const leftEnemies = enemies.filter(e => e.position.x < game.player.position.x).sort((a,b) => b.position.x - a.position.x);
-                        if (leftEnemies.length > 0) targetX = leftEnemies[0].position.x;
-                        else targetX = bounds.left + 50;
-                    } else if (gazeRatioX > 0.55) {
-                        const rightEnemies = enemies.filter(e => e.position.x >= game.player.position.x).sort((a,b) => a.position.x - b.position.x);
-                        if (rightEnemies.length > 0) targetX = rightEnemies[0].position.x;
-                        else targetX = bounds.right - 50;
+                    let nearestEnemy = null; let nearestDist = Infinity;
+                    for (const e of enemies) {
+                        const d = Math.hypot(e.position.x - worldPos.x, e.position.y - worldPos.y);
+                        if (d < nearestDist) { nearestDist = d; nearestEnemy = e; }
                     }
-                    if (typeof game.player.eyeAimX !== 'number') game.player.eyeAimX = game.player.position.x;
-                    game.player.eyeAimX += (targetX - game.player.eyeAimX) * 0.22;
-                    game.player.aimAt(game.player.eyeAimX, game.player.position.y);
+                    const SNAP_RADIUS = 70;
+                    const SNAP_STRENGTH = 0.25;
+                    if (nearestEnemy && nearestDist < SNAP_RADIUS) {
+                        worldPos.x += (nearestEnemy.position.x - worldPos.x) * SNAP_STRENGTH;
+                        worldPos.y += (nearestEnemy.position.y - worldPos.y) * SNAP_STRENGTH;
+                    }
+                    if (typeof game.player.eyeAimX !== 'number') { game.player.eyeAimX = worldPos.x; game.player.eyeAimY = worldPos.y; }
+                    game.player.eyeAimX += (worldPos.x - game.player.eyeAimX) * 0.18;
+                    game.player.eyeAimY += (worldPos.y - game.player.eyeAimY) * 0.18;
+                    game.player.aimAt(game.player.eyeAimX, game.player.eyeAimY);
                 }
             } else if (input.hasTouch) {
                 input.mode = 'touch';
@@ -406,10 +429,13 @@
         }
         function updateControlToggle() {
             const el = document.getElementById('controlToggle');
-            if (game.state !== GameState.PLAYING) { el.style.display = 'none'; return; }
+            const recal = document.getElementById('recalibrateBtn');
+            if (game.state !== GameState.PLAYING) { el.style.display = 'none'; recal.classList.remove('show'); return; }
             el.style.display = 'block';
-            const mode = eyeTracking.ready && eyeTracking.active ? '眼动' : (input.mode === 'touch' ? '触摸' : '鼠标');
+            const isEye = eyeTracking.ready && eyeTracking.active;
+            const mode = isEye ? '眼动' : (input.mode === 'touch' ? '触摸' : '鼠标');
             el.textContent = '控制: ' + mode;
+            if (isEye) recal.classList.add('show'); else recal.classList.remove('show');
         }
 
         class Entity {
@@ -1035,6 +1061,9 @@
                     } else { showToast('当前环境不支持眼动追踪'); }
                 }
             });
+            document.getElementById('recalibrateBtn').addEventListener('click', () => {
+                eyeTracking.recalibrate();
+            });
         }
 
         function bindInputEvents() {
@@ -1168,6 +1197,6 @@
         <div class="calibration-instruction" id="calibrationInstruction">请用眼睛注视屏幕上的圆点，并用手指点击它</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-16-lockon-5pt-v2</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-eye-aim-9pt-v3</div>
 </body>
 </html>
