@@ -577,7 +577,7 @@
                 super(x, y, 6); this.target = target; this.isBoss = isBoss;
                 this.speed = isBoss ? 4 : 3; this.damage = isBoss ? 15 : 8;
                 this.arcY = 0; this.flightTime = 0; this.heightArc = isBoss ? 70 : 45;
-                this.lockedTarget = target ? new Vector2(target.position.x, target.position.y) : null;
+                this.lockedTarget = target ? new Vector2(target.position.x, target.position.y - target.radius * 0.8) : null;
             }
             update(deltaTime) {
                 if (!this.lockedTarget) { this.markedForDeletion = true; return; }
@@ -871,27 +871,9 @@
                     const { enemy, drop, projs } = this.findInteractablesOnRay();
                     let laserEnd = null; let fired = false;
                     if (projs.length > 0) {
-                        const deltaYaw = headTracking.getSmoothedDeltaYaw();
-                        const deltaPitch = headTracking.getSmoothedDeltaPitch();
-                        let destroyedCount = 0;
-                        for (const p of projs) {
-                            let canDestroy = true;
-                            if (headTracking.ready && headTracking.active) {
-                                const isLeft = p.position.x < this.position.x;
-                                const headTurned = isLeft ? (deltaYaw > 0.06) : (deltaYaw < -0.06);
-                                const headUp = deltaPitch < -0.08;
-                                canDestroy = headTurned && headUp;
-                            }
-                            if (canDestroy) {
-                                p.markedForDeletion = true; destroyedCount++;
-                                for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 250));
-                            }
-                        }
-                        if (destroyedCount > 0) {
-                            const destroyedProjs = projs.filter(p => p.markedForDeletion);
-                            const farProj = destroyedProjs.reduce((a, b) => this.position.dist(a.position) > this.position.dist(b.position) ? a : b);
-                            laserEnd = new Vector2(farProj.position.x, farProj.position.y - farProj.arcY); fired = true;
-                        }
+                        for (const p of projs) { p.markedForDeletion = true; for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 250)); }
+                        const farProj = projs.reduce((a, b) => this.position.dist(a.position) > this.position.dist(b.position) ? a : b);
+                        laserEnd = new Vector2(farProj.position.x, farProj.position.y - farProj.arcY); fired = true;
                     }
                     if (drop) {
                         drop.markedForDeletion = true; this.health = Math.min(this.maxHealth, this.health + 25); this.happyTimer = 1800;
