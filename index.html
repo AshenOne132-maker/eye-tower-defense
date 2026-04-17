@@ -333,7 +333,7 @@
             update() {
                 if (this.active) {
                     const diff = this.yaw - this.smoothYaw;
-                    const t = Math.abs(diff) < 0.03 ? 0.25 : 0.12;
+                    const t = Math.abs(diff) < 0.03 ? 0.35 : 0.22;
                     this.smoothYaw += diff * t;
                     this.history.push(this.smoothYaw);
                     if (this.history.length > this.historySize) this.history.shift();
@@ -361,12 +361,12 @@
                     let chosenEnemy = null;
                     const STICKY_RADIUS = 120;
                     let candidateEnemies = [];
-                    if (deltaYaw < -0.10) {
+                    if (deltaYaw > 0.06) {
                         candidateEnemies = enemies.filter(e => e.position.x < game.player.position.x).sort((a,b) => a.position.x - b.position.x);
-                    } else if (deltaYaw > 0.10) {
+                    } else if (deltaYaw < -0.06) {
                         candidateEnemies = enemies.filter(e => e.position.x > game.player.position.x).sort((a,b) => b.position.x - a.position.x);
                     } else {
-                        candidateEnemies = enemies.slice().sort((a,b) => Math.abs(a.position.x - game.player.position.x) - Math.abs(b.position.x - game.player.position.x));
+                        candidateEnemies = [];
                     }
                     if (game.player.lastLockedEnemy && candidateEnemies.includes(game.player.lastLockedEnemy)) {
                         const d = Math.hypot(game.player.lastLockedEnemy.position.x - game.player.position.x, game.player.lastLockedEnemy.position.y - game.player.position.y);
@@ -378,13 +378,19 @@
                         game.player.lastLockedEnemy = chosenEnemy;
                     } else {
                         game.player.lastLockedEnemy = null;
-                        if (deltaYaw < -0.10) targetX = bounds.left + 60;
-                        else if (deltaYaw > 0.10) targetX = bounds.right - 60;
+                        if (deltaYaw > 0.06) targetX = bounds.left + 60;
+                        else if (deltaYaw < -0.06) targetX = bounds.right - 60;
+                        else targetX = game.player.position.x;
                     }
                     const targetY = game.player.position.y;
-                    if (typeof game.player.headAimX !== 'number') { game.player.headAimX = targetX; }
-                    game.player.headAimX += (targetX - game.player.headAimX) * 0.32;
-                    game.player.aimAt(game.player.headAimX, targetY);
+                    if (Math.abs(deltaYaw) <= 0.06) {
+                        game.player.headAimX = game.player.position.x;
+                        game.player.aimAt(game.player.position.x, game.player.position.y - 300);
+                    } else {
+                        if (typeof game.player.headAimX !== 'number') { game.player.headAimX = targetX; }
+                        game.player.headAimX += (targetX - game.player.headAimX) * 0.32;
+                        game.player.aimAt(game.player.headAimX, targetY);
+                    }
                 }
             } else if (input.hasTouch) {
                 input.mode = 'touch';
