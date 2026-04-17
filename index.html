@@ -740,7 +740,7 @@
                     for (let i = 0; i < 20; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#ff0000', 500));
                 }
                 if (this.summonTimer <= 0) {
-                    this.summonTimer = 6000;
+                    this.summonTimer = 12000;
                     game.entities.push(new Enemy(-50, game.groundY - 25, 'melee'));
                     game.entities.push(new Enemy(game.canvas.width + 50, game.groundY - 20, 'ranged'));
                 }
