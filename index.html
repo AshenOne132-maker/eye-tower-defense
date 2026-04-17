@@ -53,6 +53,11 @@
         .calibration-point.completed { background: radial-gradient(circle, #00ff00 0%, #00aa00 100%); animation: none; }
         @keyframes pulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(0.85); } }
         .pulse-beat { animation: pulse 0.25s ease-in-out 2; }
+        .orientation-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0f0f23; display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 20000; color: #fff; text-align: center; padding: 20px; }
+        .orientation-overlay.show { display: flex; }
+        .orientation-icon { font-size: 64px; margin-bottom: 20px; }
+        .orientation-title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+        .orientation-text { font-size: 14px; color: rgba(255,255,255,0.7); max-width: 300px; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -134,7 +139,7 @@
             TRANSFORM_DRAIN: 35,
             TRANSFORM_DAMAGE: 40,
             BOSS_SPAWN_WAVE: 2,
-            BOSS_HEALTH: 400,
+            BOSS_HEALTH: 800,
             BOSS_KNOCKBACK_THRESHOLD: 100
         };
 
@@ -540,10 +545,10 @@
                     }
                     for (const p of game.entities) {
                         if (p instanceof Projectile && !p.markedForDeletion) {
-                            const dy = Math.abs((p.position.y - p.arcY) - this.position.y);
+                            const dy = Math.abs(p.position.y - this.position.y);
                             if (dy < this.width / 2 + p.radius) {
                                 const inBeam = this.direction === 'left' ? p.position.x <= this.position.x : p.position.x >= this.position.x;
-                                if (inBeam) { p.markedForDeletion = true; for (let i = 0; i < 5; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 300)); }
+                                if (inBeam) { p.markedForDeletion = true; for (let i = 0; i < 5; i++) game.particles.push(new Particle(p.position.x, p.position.y, '#fbbf24', 300)); }
                             }
                         }
                     }
@@ -576,31 +581,38 @@
             constructor(x, y, target, isBoss = false) {
                 super(x, y, 6); this.target = target; this.isBoss = isBoss;
                 this.speed = isBoss ? 4 : 3; this.damage = isBoss ? 15 : 8;
-                this.arcY = 0; this.flightTime = 0; this.heightArc = isBoss ? 70 : 45;
-                this.lockedTarget = target ? new Vector2(target.position.x, target.position.y) : null;
+                this.heightArc = isBoss ? 70 : 45;
+                this.startPos = new Vector2(x, y);
+                this.endPos = target ? new Vector2(target.position.x, target.position.y) : new Vector2(x, y);
+                this.totalDist = this.startPos.dist(this.endPos);
+                this.traveled = 0;
             }
             update(deltaTime) {
-                if (!this.lockedTarget) { this.markedForDeletion = true; return; }
-                const dir = this.lockedTarget.sub(this.position).normalize();
-                this.velocity = dir.mult(this.speed);
-                super.update(deltaTime);
-                this.flightTime += deltaTime;
-                const progress = Math.min(this.flightTime / 500, 1);
-                this.arcY = Math.sin(progress * Math.PI) * this.heightArc;
-                if (this.position.dist(this.lockedTarget) < this.radius + this.radius + 8) {
-                    if (this.target && this.target.health > 0) this.target.takeDamage(this.damage);
+                if (this.totalDist <= 0 || !this.target) { this.markedForDeletion = true; return; }
+                const step = this.speed * (deltaTime / 16);
+                this.traveled += step;
+                const t = Math.min(this.traveled / this.totalDist, 1);
+                const baseX = this.startPos.x + (this.endPos.x - this.startPos.x) * t;
+                const baseY = this.startPos.y + (this.endPos.y - this.startPos.y) * t;
+                const arc = Math.sin(t * Math.PI) * this.heightArc;
+                this.position.x = baseX;
+                this.position.y = baseY - arc;
+                if (t >= 1 || this.position.dist(this.endPos) < this.radius + 8) {
+                    if (this.target.health > 0) this.target.takeDamage(this.damage);
                     this.markedForDeletion = true;
                     for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#ff3333', 250));
                 }
             }
             draw(ctx) {
+                const t = this.totalDist > 0 ? Math.min(this.traveled / this.totalDist, 1) : 0;
+                const baseY = this.startPos.y + (this.endPos.y - this.startPos.y) * t;
                 ctx.save();
                 ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                ctx.beginPath(); ctx.arc(this.position.x, this.position.y, 4, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(this.position.x, baseY, 4, 0, Math.PI*2); ctx.fill();
                 ctx.fillStyle = this.isBoss ? '#ff6b6b' : '#fbbf24';
-                ctx.beginPath(); ctx.arc(this.position.x, this.position.y - this.arcY, this.radius, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = this.isBoss ? '#dc2626' : '#d97706'; ctx.lineWidth = 2;
-                ctx.beginPath(); ctx.arc(this.position.x, this.position.y - this.arcY, this.radius, 0, Math.PI*2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(this.position.x, this.position.y, this.radius, 0, Math.PI*2); ctx.stroke();
                 ctx.restore();
             }
         }
@@ -850,7 +862,7 @@
                         if (diff < 0.35) { const d = this.position.dist(e.position); if (d < closestEnemyDist) { closestEnemy = e; closestEnemyDist = d; } }
                     }
                     if (e instanceof Projectile && !e.markedForDeletion) {
-                        const px = e.position.x; const py = e.position.y - e.arcY;
+                        const px = e.position.x; const py = e.position.y;
                         if (px < bounds.left - 30 || px > bounds.right + 30) continue;
                         const dx = px - this.position.x; const dy = py - this.position.y;
                         const a = Math.atan2(dy, dx); let diff = Math.abs(a - this.aimAngle);
@@ -871,9 +883,9 @@
                     const { enemy, drop, projs } = this.findInteractablesOnRay();
                     let laserEnd = null; let fired = false;
                     if (projs.length > 0) {
-                        for (const p of projs) { p.markedForDeletion = true; for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 250)); }
+                        for (const p of projs) { p.markedForDeletion = true; for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y, '#fbbf24', 250)); }
                         const farProj = projs.reduce((a, b) => this.position.dist(a.position) > this.position.dist(b.position) ? a : b);
-                        laserEnd = new Vector2(farProj.position.x, farProj.position.y - farProj.arcY); fired = true;
+                        laserEnd = new Vector2(farProj.position.x, farProj.position.y); fired = true;
                     }
                     if (drop) {
                         drop.markedForDeletion = true; this.health = Math.min(this.maxHealth, this.health + 25); this.happyTimer = 1800;
@@ -981,7 +993,7 @@
 
         function init() {
             game.canvas = document.getElementById('gameCanvas'); game.ctx = game.canvas.getContext('2d');
-            resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+            resizeCanvas(); window.addEventListener('resize', resizeCanvas); window.addEventListener('orientationchange', checkOrientation);
             bindEvents(); bindInputEvents(); requestAnimationFrame(gameLoop);
             console.log('[EyeTowerDefense] Version 2026-04-16-v3 loaded');
             setTimeout(() => { initHeadTracking(); }, 500);
@@ -1003,7 +1015,22 @@
             headTracking.init();
         }
 
-        function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
+        function checkOrientation() {
+            const overlay = document.getElementById('orientationOverlay');
+            const isLandscape = window.innerWidth > window.innerHeight;
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            if (isLandscape) {
+                overlay.classList.add('show');
+                document.getElementById('orientationText').textContent = isMobile
+                    ? '请将设备旋转为竖屏方向，以获得最佳游戏体验。'
+                    : '请将浏览器窗口调整为竖屏比例（高度大于宽度），或使用移动设备游玩。';
+                game.isPaused = true;
+            } else {
+                overlay.classList.remove('show');
+                if (game.isPaused && !headTracking.isCalibrating) game.isPaused = false;
+            }
+        }
+        function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; checkOrientation(); }
 
         function isMobile() {
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -1216,6 +1243,11 @@
         <div class="calibration-pause-hint" id="calibrationPauseHint">游戏已暂停，校准完成后自动恢复</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-head-pitch-v6</div>
+    <div id="orientationOverlay" class="orientation-overlay">
+        <div class="orientation-icon">📱</div>
+        <div class="orientation-title">请使用竖屏游玩</div>
+        <div class="orientation-text" id="orientationText">请将设备旋转为竖屏方向，以获得最佳游戏体验。</div>
+    </div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-head-arc-v7</div>
 </body>
 </html>
