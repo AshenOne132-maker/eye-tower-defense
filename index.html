@@ -768,6 +768,7 @@
                     for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*60, this.position.y + (Math.random()-0.5)*40, '#60a5fa', 300));
                     if (this.shield <= 0) {
                         this.shield = 0; this.shieldTimer = 0;
+                        this.state = 'stun'; this.stunTimer = 1800;
                         showToast('💥 Boss 护盾破碎！弱点暴露！');
                         for (let i = 0; i < 15; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#3b82f6', 500));
                     }
