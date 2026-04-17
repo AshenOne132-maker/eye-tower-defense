@@ -715,7 +715,7 @@
         class Boss extends Entity {
             constructor(x, y) {
                 super(x, y, 42); this.maxHealth = CONFIG.BOSS_HEALTH; this.health = this.maxHealth;
-                this.speed = 0.55; this.baseSpeed = 0.55; this.attackRangeMelee = 55; this.damageMelee = 18; this.damageRange = 12;
+                this.speed = 0.55; this.baseSpeed = 0.55; this.attackRangeMelee = 55; this.damageMelee = 12; this.damageRange = 12;
                 this.state = 'chase'; this.animFrame = 0; this.deathTimer = 0; this.stunTimer = 0;
                 this.projectileTimer = 0; this.meleeCooldown = 0; this.dashTimer = 0;
                 this.nextKnockbackHealth = this.maxHealth - CONFIG.BOSS_KNOCKBACK_THRESHOLD;
