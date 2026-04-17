@@ -231,8 +231,9 @@
                     await Promise.race([webgazer.begin(), timeoutPromise]);
                     this.active = true;
                     this.styleVideoPreview();
-                    showToast('摄像头已启用，开始校准');
-                    setTimeout(() => { this.startCalibration(); }, 600);
+                    this.ready = true;
+                    updateEyeStatus(true); updateControlToggle();
+                    showToast('眼动已启动，看左/看右即可瞄准');
                     return { success: true };
                 } catch (e) { 
                     console.error('Eye tracking start failed:', e); 
@@ -305,9 +306,6 @@
                 point.style.top = screenY + 'px';
                 const handler = (e) => {
                     e.preventDefault();
-                    if (typeof webgazer !== 'undefined' && webgazer.recordScreenPosition) {
-                        webgazer.recordScreenPosition(screenX, screenY, 'click');
-                    }
                     this.clicksOnCurrentPoint++;
                     if (this.clicksOnCurrentPoint >= this.clicksPerPoint) {
                         point.classList.add('completed');
@@ -318,7 +316,7 @@
                         }, 200);
                     } else {
                         point.classList.remove('completed');
-                        void point.offsetWidth; // trigger reflow for re-animation
+                        void point.offsetWidth;
                         point.classList.add('pulse-beat');
                         setTimeout(() => point.classList.remove('pulse-beat'), 150);
                     }
@@ -347,9 +345,7 @@
             },
             recalibrate() {
                 if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
-                this.ready = false;
-                showToast('开始重新校准，游戏已暂停');
-                setTimeout(() => { this.startCalibration(); }, 400);
+                showToast('当前使用默认眼动模型，无需校准');
             },
             pause() {
                 this.ready = false; this.active = false;
@@ -422,9 +418,9 @@
                     let chosenEnemy = null;
                     const STICKY_RADIUS = 120;
                     let candidateEnemies = [];
-                    if (gazeRatioX < 0.42) {
+                    if (gazeRatioX < 0.35) {
                         candidateEnemies = enemies.filter(e => e.position.x < game.player.position.x).sort((a,b) => a.position.x - b.position.x);
-                    } else if (gazeRatioX > 0.58) {
+                    } else if (gazeRatioX > 0.65) {
                         candidateEnemies = enemies.filter(e => e.position.x > game.player.position.x).sort((a,b) => b.position.x - a.position.x);
                     } else {
                         candidateEnemies = enemies.slice().sort((a,b) => Math.abs(a.position.x - game.player.position.x) - Math.abs(b.position.x - game.player.position.x));
