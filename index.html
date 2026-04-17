@@ -7,7 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>眼动塔防 v3 - Eye Tower Defense</title>
-    <script id="wgScript" src="dist/webgazer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
         html, body { width: 100%; height: 100%; overflow: hidden; background: #0f0f23; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -32,9 +33,9 @@
         .permission-title { font-size: 24px; color: #fff; font-weight: bold; margin-bottom: 10px; text-align: center; }
         .permission-text { font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 25px; text-align: center; max-width: 300px; line-height: 1.5; }
         .permission-status { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 15px; text-align: center; }
-        .eye-status { position: fixed; top: 10px; right: 10px; width: 12px; height: 12px; border-radius: 50%; background: #6b7280; z-index: 4000; border: 2px solid rgba(255,255,255,0.3); }
-        .eye-status.active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
-        .eye-status.inactive { background: #ef4444; }
+        .head-status { position: fixed; top: 10px; right: 10px; width: 12px; height: 12px; border-radius: 50%; background: #6b7280; z-index: 4000; border: 2px solid rgba(255,255,255,0.3); }
+        .head-status.active { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+        .head-status.inactive { background: #ef4444; }
         .control-toggle { position: fixed; top: 10px; right: 30px; padding: 4px 10px; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; border-radius: 12px; z-index: 4000; border: 1px solid rgba(255,255,255,0.2); pointer-events: auto; cursor: pointer; }
         .recalibrate-btn { position: fixed; top: 10px; right: 92px; padding: 4px 10px; background: rgba(233,69,96,0.25); color: #fff; font-size: 11px; border-radius: 12px; z-index: 4000; border: 1px solid rgba(233,69,96,0.5); pointer-events: auto; cursor: pointer; display: none; }
         .recalibrate-btn.show { display: block; }
@@ -82,9 +83,9 @@
     <div id="permissionOverlay" class="permission-overlay hidden">
         <div id="permInitial">
             <div class="permission-icon">📷</div>
-            <div class="permission-title">启用眼动追踪</div>
+            <div class="permission-title">启用头部控制</div>
             <div class="permission-text">
-                我们需要访问摄像头来实现眼动瞄准。<br>视频仅在本地处理，不会上传。<br>您也可以拒绝，改用触摸或鼠标控制。
+                我们需要访问摄像头来检测头部转动方向。<br>视频仅在本地处理，不会上传。<br>您也可以拒绝，改用触摸或鼠标控制。
             </div>
             <button class="btn" id="allowCameraBtn">允许访问</button>
             <button class="btn" id="denyCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563);">使用触摸/鼠标</button>
@@ -92,19 +93,19 @@
         <div id="permLoading" style="display:none; flex-direction:column; align-items:center;">
             <div style="width:48px; height:48px; border:4px solid rgba(255,255,255,0.1); border-top-color:#e94560; border-radius:50%; animation:spin 1s linear infinite; margin-bottom:20px;"></div>
             <div class="permission-title">正在启动摄像头...</div>
-            <div class="permission-text">请允许浏览器使用摄像头，眼动模型正在加载</div>
+            <div class="permission-text">请允许浏览器使用摄像头，头部检测模型正在加载</div>
             <button class="btn" id="cancelCameraBtn" style="background: linear-gradient(135deg, #6b7280, #4b5563); margin-top:15px;">取消</button>
         </div>
         <div id="permError" style="display:none; flex-direction:column; align-items:center;">
             <div class="permission-icon">⚠️</div>
-            <div class="permission-title">眼动启动失败</div>
+            <div class="permission-title">头部控制启动失败</div>
             <div class="permission-text" id="permErrorText" style="color:#fca5a5; margin-bottom:20px;">未知错误</div>
             <button class="btn" id="retryCameraBtn">重试</button>
             <button class="btn" id="denyCameraBtn2" style="background: linear-gradient(135deg, #6b7280, #4b5563); margin-top:10px;">使用触摸/鼠标</button>
         </div>
         <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
     </div>
-    <div id="eyeStatus" class="eye-status"></div>
+    <div id="headStatus" class="head-status"></div>
     <div id="controlToggle" class="control-toggle" style="display:none;">控制: 自动</div>
     <div id="recalibrateBtn" class="recalibrate-btn">重新校准</div>
     <div id="toast" class="toast"></div>
@@ -184,60 +185,69 @@
             }
         };
 
-        const eyeTracking = {
+        const headTracking = {
             initialized: false, active: false, ready: false,
-            gazeX: 0, gazeY: 0, smoothX: 0, smoothY: 0,
-            history: [], historySize: 6,
-            suppressUntil: 0,
-            isSuppressed() { return performance.now() < this.suppressUntil; },
-            suppress(ms) { this.suppressUntil = performance.now() + ms; },
-            isCalibrating: false, calibrationIndex: 0,
-            calibrationPositions: [
-                {x: 10, y: 10}, {x: 50, y: 10}, {x: 90, y: 10},
-                {x: 10, y: 50}, {x: 50, y: 50}, {x: 90, y: 50},
-                {x: 10, y: 90}, {x: 50, y: 90}, {x: 90, y: 90}
-            ],
-            checkAvailable() { return typeof webgazer !== 'undefined'; },
+            yaw: 0, smoothYaw: 0, neutralYaw: 0,
+            history: [], historySize: 8,
+            isCalibrating: false, calibrationSamples: [],
+            faceMesh: null, camera: null, videoElement: null,
+            checkAvailable() { return typeof FaceMesh !== 'undefined' && typeof Camera !== 'undefined'; },
             init() {
-                console.log('[EyeDiag] init called, checkAvailable=' + this.checkAvailable());
                 if (!this.checkAvailable()) {
-                    if (!this._initRetryCount) this._initRetryCount = 0;
-                    this._initRetryCount++;
-                    if (this._initRetryCount < 40) {
-                        setTimeout(() => this.init(), 500);
-                    } else {
-                        console.error('WebGazer failed to load after 20s');
-                        updateEyeStatus(false);
-                    }
-                    return false;
+                    console.error('MediaPipe FaceMesh not available');
+                    updateHeadStatus(false); return false;
                 }
                 try {
-                    webgazer.setGazeListener((data) => {
-                        if (data && data.x != null && data.y != null) {
-                            this.gazeX = data.x; this.gazeY = data.y; this.active = true; updateEyeStatus(true);
-                        }
+                    this.videoElement = document.createElement('video');
+                    this.videoElement.style.display = 'none';
+                    document.body.appendChild(this.videoElement);
+                    this.faceMesh = new FaceMesh({locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+                    }});
+                    this.faceMesh.setOptions({
+                        maxNumFaces: 1,
+                        refineLandmarks: false,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
                     });
-                    webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
-                    try { webgazer.applyKalmanFilter(true); } catch(e){}
-                    this.styleVideoPreview(); this.initialized = true; this._initRetryCount = 0; return true;
-                } catch (e) { console.error(e); updateEyeStatus(false); return false; }
+                    this.faceMesh.onResults((results) => this.onResults(results));
+                    this.initialized = true;
+                    return true;
+                } catch (e) { console.error(e); updateHeadStatus(false); return false; }
+            },
+            onResults(results) {
+                if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                    const lm = results.multiFaceLandmarks[0];
+                    const nose = lm[1];
+                    const leftCheek = lm[234];
+                    const rightCheek = lm[454];
+                    const faceCenterX = (leftCheek.x + rightCheek.x) / 2;
+                    const faceWidth = Math.hypot(rightCheek.x - leftCheek.x, rightCheek.y - leftCheek.y);
+                    const rawYaw = faceWidth > 0 ? (nose.x - faceCenterX) / faceWidth : 0;
+                    this.yaw = rawYaw;
+                    this.active = true;
+                    updateHeadStatus(true);
+                    if (this.isCalibrating) {
+                        this.calibrationSamples.push(rawYaw);
+                    }
+                }
             },
             async start() {
-                console.log('[EyeDiag] start called, initialized=' + this.initialized);
-                if (!this.initialized) return { success: false, error: '眼动引擎未初始化，请刷新页面重试' };
+                if (!this.initialized) return { success: false, error: '头部引擎未初始化，请刷新页面重试' };
                 try {
-                    const timeoutMs = 20000;
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('眼动模型加载超时（20秒），请检查网络')), timeoutMs));
-                    await Promise.race([webgazer.begin(), timeoutPromise]);
+                    this.camera = new Camera(this.videoElement, {
+                        onFrame: async () => { await this.faceMesh.send({image: this.videoElement}); },
+                        width: 320, height: 240
+                    });
+                    await this.camera.start();
                     this.active = true;
-                    this.styleVideoPreview();
-                    this.ready = true;
-                    updateEyeStatus(true); updateControlToggle();
-                    showToast('眼动已启动，看左/看右即可瞄准');
+                    updateHeadStatus(true); updateControlToggle();
+                    showToast('摄像头已启用，开始头部校准');
+                    setTimeout(() => { this.startCalibration(); }, 600);
                     return { success: true };
-                } catch (e) { 
-                    console.error('Eye tracking start failed:', e); 
-                    this.ready = false; this.active = false; updateEyeStatus(false); updateControlToggle();
+                } catch (e) {
+                    console.error('Head tracking start failed:', e);
+                    this.ready = false; this.active = false; updateHeadStatus(false); updateControlToggle();
                     let msg = '';
                     if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
                         msg = '摄像头权限被拒绝。请在浏览器地址栏左侧 🔒 图标中设置为"允许"。';
@@ -248,184 +258,112 @@
                     } else {
                         msg = (e.message || '未知错误') + '。建议连接稳定 WiFi 后重试。';
                     }
-                    return { success: false, error: msg }; 
+                    return { success: false, error: msg };
                 }
             },
             startCalibration() {
                 if (this.isCalibrating) return;
-                if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
                 game.isPaused = true;
-                this.isCalibrating = true; this.calibrationIndex = 0;
-                this.calibrationPositions = [
-                    {x: 20, y: 50}, {x: 50, y: 50}, {x: 80, y: 50}
-                ];
-                if (typeof webgazer !== 'undefined') {
-                    try { webgazer.showVideo(false); webgazer.showFaceOverlay(false); webgazer.showFaceFeedbackBox(false); } catch(e){}
-                }
-                const wgContainer = document.getElementById('webgazerVideoContainer');
-                if (wgContainer) wgContainer.style.display = 'none';
+                this.isCalibrating = true; this.calibrationSamples = [];
                 const overlay = document.getElementById('calibrationOverlay');
                 overlay.classList.remove('hidden');
-                this.createProgressDots();
-                this.showNextCalibrationPoint();
-            },
-            createProgressDots() {
-                const container = document.getElementById('calibrationProgress');
-                container.innerHTML = '';
-                for (let i = 0; i < this.calibrationPositions.length; i++) {
-                    const dot = document.createElement('div');
-                    dot.className = 'progress-dot'; dot.id = 'progress-dot-' + i;
-                    container.appendChild(dot);
-                }
-            },
-            showNextCalibrationPoint() {
-                if (this.calibrationIndex >= this.calibrationPositions.length) {
-                    this.finishCalibration(); return;
-                }
-                this.clicksOnCurrentPoint = 0;
-                for (let i = 0; i < this.calibrationPositions.length; i++) {
-                    const dot = document.getElementById('progress-dot-' + i);
-                    dot.classList.remove('active', 'completed');
-                    if (i < this.calibrationIndex) dot.classList.add('completed');
-                    else if (i === this.calibrationIndex) dot.classList.add('active');
-                }
-                const pos = this.calibrationPositions[this.calibrationIndex];
-                this.createCalibrationPoint(pos.x, pos.y);
-                document.getElementById('calibrationInstruction').textContent = '请用眼睛注视圆点，自动记录中（' + (this.calibrationIndex + 1) + '/' + this.calibrationPositions.length + '）';
-            },
-            createCalibrationPoint(x, y) {
+                document.getElementById('calibrationInstruction').textContent = '请保持头部正对屏幕，自动校准中…';
+                document.getElementById('calibrationProgress').innerHTML = '';
                 const old = document.getElementById('currentCalibrationPoint');
                 if (old) old.remove();
-                const screenX = (x / 100) * window.innerWidth;
-                const screenY = (y / 100) * window.innerHeight;
-                const point = document.createElement('div');
-                point.id = 'currentCalibrationPoint';
-                point.className = 'calibration-point';
-                point.style.left = screenX + 'px';
-                point.style.top = screenY + 'px';
-                const countLabel = document.createElement('div');
-                countLabel.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:14px;font-weight:bold;pointer-events:none;';
-                countLabel.textContent = '2';
-                point.appendChild(countLabel);
-                document.getElementById('calibrationOverlay').appendChild(point);
-                let count = 2;
-                const countdownTimer = setInterval(() => {
+                let count = 3;
+                const label = document.createElement('div');
+                label.id = 'calibrationCountdown';
+                label.style.cssText = 'font-size:48px;color:#00ffff;font-weight:bold;margin-top:20px;';
+                label.textContent = String(count);
+                overlay.appendChild(label);
+                const timer = setInterval(() => {
                     count--;
-                    if (count >= 0) countLabel.textContent = count > 0 ? String(count) : '';
+                    label.textContent = count > 0 ? String(count) : '';
                 }, 1000);
                 setTimeout(() => {
-                    const sampleTimer = setInterval(() => {
-                        if (typeof webgazer !== 'undefined' && webgazer.recordScreenPosition) {
-                            webgazer.recordScreenPosition(screenX, screenY, 'click');
-                        }
-                    }, 200);
-                    setTimeout(() => {
-                        clearInterval(sampleTimer);
-                        clearInterval(countdownTimer);
-                        point.remove();
-                        this.calibrationIndex++;
-                        this.showNextCalibrationPoint();
-                    }, 1600);
-                }, 500);
+                    clearInterval(timer);
+                    label.remove();
+                    this.finishCalibration();
+                }, 3000);
             },
             finishCalibration() {
                 this.isCalibrating = false;
                 game.isPaused = false;
                 document.getElementById('calibrationOverlay').classList.add('hidden');
-                if (typeof webgazer !== 'undefined') {
-                    try {
-                        webgazer.showVideo(true); webgazer.showFaceOverlay(true); webgazer.showFaceFeedbackBox(true);
-                        webgazer.applyKalmanFilter(true);
-                    } catch(e){}
+                if (this.calibrationSamples.length > 0) {
+                    const sorted = this.calibrationSamples.slice().sort((a,b) => a - b);
+                    this.neutralYaw = sorted[Math.floor(sorted.length / 2)];
+                } else {
+                    this.neutralYaw = 0;
                 }
-                const wgContainer2 = document.getElementById('webgazerVideoContainer');
-                if (wgContainer2) wgContainer2.style.display = 'block';
-                this.styleVideoPreview();
                 this.ready = true;
-                updateEyeStatus(true); updateControlToggle();
-                showToast('眼动追踪已就绪！');
-                console.log('Calibration finished');
+                updateHeadStatus(true); updateControlToggle();
+                showToast('头部控制已就绪！左右转头即可瞄准');
+                console.log('Head calibration finished, neutralYaw=', this.neutralYaw);
             },
             recalibrate() {
-                if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
+                if (!this.initialized) { showToast('头部引擎未初始化'); return; }
                 this.ready = false;
                 showToast('开始重新校准，游戏已暂停');
                 setTimeout(() => { this.startCalibration(); }, 400);
             },
             pause() {
-                this.ready = false; this.active = false;
-                updateEyeStatus(false); updateControlToggle();
+                this.ready = false;
+                updateHeadStatus(false); updateControlToggle();
                 showToast('已手动切换为触摸/鼠标');
             },
             resume() {
-                if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
+                if (!this.initialized) { showToast('头部引擎未初始化'); return; }
                 if (this.isCalibrating) { showToast('请先完成校准'); return; }
-                this.ready = true; this.active = true;
-                updateEyeStatus(true); updateControlToggle();
-                showToast('已恢复眼动控制');
+                this.ready = true;
+                updateHeadStatus(true); updateControlToggle();
+                showToast('已恢复头部控制');
             },
             stop() {
-                if (typeof webgazer !== 'undefined') webgazer.end();
+                if (this.camera) { this.camera.stop(); this.camera = null; }
                 this.ready = false; this.active = false; this.isCalibrating = false;
                 document.getElementById('calibrationOverlay').classList.add('hidden');
                 const old = document.getElementById('currentCalibrationPoint');
                 if (old) old.remove();
-                updateEyeStatus(false); updateControlToggle();
-            },
-            styleVideoPreview() {
-                setTimeout(() => {
-                    const el = document.getElementById('webgazerVideoContainer');
-                    if (el) el.style.cssText = 'position:fixed!important;bottom:10px!important;right:10px!important;width:80px!important;height:60px!important;border-radius:8px!important;overflow:hidden!important;border:2px solid rgba(0,255,255,0.35)!important;z-index:9999!important;opacity:0.85!important;';
-                    const feed = document.getElementById('webgazerVideoFeed');
-                    if (feed) feed.style.cssText = 'width:100%!important;height:100%!important;object-fit:cover!important;';
-                    const box = document.getElementById('webgazerFaceFeedbackBox');
-                    if (box) box.style.cssText = 'position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;border:2px solid #00ff00!important;border-radius:50%!important;';
-                }, 1000);
+                const lbl = document.getElementById('calibrationCountdown');
+                if (lbl) lbl.remove();
+                updateHeadStatus(false); updateControlToggle();
             },
             update() {
                 if (this.active) {
-                    const dx = this.gazeX - this.smoothX;
-                    const dy = this.gazeY - this.smoothY;
-                    const dist = Math.sqrt(dx*dx + dy*dy);
-                    let t = dist < 15 ? 0.22 : (dist < 60 ? 0.14 : 0.08);
-                    this.smoothX += dx * t;
-                    this.smoothY += dy * t;
-                    this.history.push({x: this.smoothX, y: this.smoothY});
+                    const diff = this.yaw - this.smoothYaw;
+                    const t = Math.abs(diff) < 0.03 ? 0.25 : 0.12;
+                    this.smoothYaw += diff * t;
+                    this.history.push(this.smoothYaw);
                     if (this.history.length > this.historySize) this.history.shift();
                 }
             },
-            getSmoothedGaze() {
-                if (this.history.length === 0) return {x: this.smoothX, y: this.smoothY};
-                let sx = 0, sy = 0;
-                for (const p of this.history) { sx += p.x; sy += p.y; }
-                return {x: sx / this.history.length, y: sy / this.history.length};
+            getSmoothedDeltaYaw() {
+                if (this.history.length === 0) return this.smoothYaw - this.neutralYaw;
+                const avg = this.history.reduce((a,b) => a + b, 0) / this.history.length;
+                return avg - this.neutralYaw;
             }
         };
 
         const input = { mode: 'mouse', mouseX: 0, mouseY: 0, touchX: 0, touchY: 0, hasTouch: false, hasMouse: false };
 
         function updateInput() {
-            eyeTracking.update();
+            headTracking.update();
             const rect = game.canvas.getBoundingClientRect();
-            if (eyeTracking.ready && eyeTracking.active) {
-                input.mode = 'eye';
+            if (headTracking.ready && headTracking.active) {
+                input.mode = 'head';
                 if (game.state === GameState.PLAYING && game.player) {
-                    if (eyeTracking.isSuppressed()) {
-                        // 点击/触摸期间忽略 gaze 数据，保持上一帧瞄准角度
-                        game.player.aimAt(game.player.eyeAimX || game.player.position.x, game.player.position.y);
-                    } else {
-                    const gaze = eyeTracking.getSmoothedGaze();
-                    const screenW = window.innerWidth;
-                    const gazeRatioX = gaze.x / screenW;
+                    const deltaYaw = headTracking.getSmoothedDeltaYaw();
                     const enemies = game.entities.filter(e => (e instanceof Enemy || e instanceof Boss) && e.state !== 'die');
                     let targetX = game.player.position.x;
                     const bounds = camera.getWorldBounds();
                     let chosenEnemy = null;
                     const STICKY_RADIUS = 120;
                     let candidateEnemies = [];
-                    if (gazeRatioX < 0.35) {
+                    if (deltaYaw < -0.10) {
                         candidateEnemies = enemies.filter(e => e.position.x < game.player.position.x).sort((a,b) => a.position.x - b.position.x);
-                    } else if (gazeRatioX > 0.65) {
+                    } else if (deltaYaw > 0.10) {
                         candidateEnemies = enemies.filter(e => e.position.x > game.player.position.x).sort((a,b) => b.position.x - a.position.x);
                     } else {
                         candidateEnemies = enemies.slice().sort((a,b) => Math.abs(a.position.x - game.player.position.x) - Math.abs(b.position.x - game.player.position.x));
@@ -440,14 +378,13 @@
                         game.player.lastLockedEnemy = chosenEnemy;
                     } else {
                         game.player.lastLockedEnemy = null;
-                        if (gazeRatioX < 0.42) targetX = bounds.left + 60;
-                        else if (gazeRatioX > 0.58) targetX = bounds.right - 60;
+                        if (deltaYaw < -0.10) targetX = bounds.left + 60;
+                        else if (deltaYaw > 0.10) targetX = bounds.right - 60;
                     }
                     const targetY = game.player.position.y;
-                    if (typeof game.player.eyeAimX !== 'number') { game.player.eyeAimX = targetX; }
-                    game.player.eyeAimX += (targetX - game.player.eyeAimX) * 0.32;
-                    game.player.aimAt(game.player.eyeAimX, targetY);
-                    }
+                    if (typeof game.player.headAimX !== 'number') { game.player.headAimX = targetX; }
+                    game.player.headAimX += (targetX - game.player.headAimX) * 0.32;
+                    game.player.aimAt(game.player.headAimX, targetY);
                 }
             } else if (input.hasTouch) {
                 input.mode = 'touch';
@@ -461,18 +398,18 @@
             updateControlToggle();
         }
 
-        function updateEyeStatus(active) {
-            document.getElementById('eyeStatus').className = active ? 'eye-status active' : 'eye-status inactive';
+        function updateHeadStatus(active) {
+            document.getElementById('headStatus').className = active ? 'head-status active' : 'head-status inactive';
         }
         function updateControlToggle() {
             const el = document.getElementById('controlToggle');
             const recal = document.getElementById('recalibrateBtn');
             if (game.state !== GameState.PLAYING) { el.style.display = 'none'; recal.classList.remove('show'); return; }
             el.style.display = 'block';
-            const isEye = eyeTracking.ready && eyeTracking.active;
-            const mode = isEye ? '眼动' : (input.mode === 'touch' ? '触摸' : '鼠标');
+            const isHead = headTracking.ready && headTracking.active;
+            const mode = isHead ? '头部' : (input.mode === 'touch' ? '触摸' : '鼠标');
             el.textContent = '控制: ' + mode;
-            if (isEye) recal.classList.add('show'); else recal.classList.remove('show');
+            if (isHead) recal.classList.add('show'); else recal.classList.remove('show');
         }
 
         class Entity {
@@ -1008,26 +945,23 @@
             resizeCanvas(); window.addEventListener('resize', resizeCanvas);
             bindEvents(); bindInputEvents(); requestAnimationFrame(gameLoop);
             console.log('[EyeTowerDefense] Version 2026-04-16-v3 loaded');
-            setTimeout(() => { initEyeTracking(); }, 500);
+            setTimeout(() => { initHeadTracking(); }, 500);
         }
 
-        function initEyeTracking() {
-            console.log('[EyeDiag] initEyeTracking called, typeof webgazer=' + typeof window.webgazer + ', script=' + !!document.getElementById('wgScript'));
+        function initHeadTracking() {
             const overlay = document.getElementById('permissionOverlay');
             overlay.classList.remove('hidden');
-            if (!eyeTracking.checkAvailable()) {
-                console.error('[EyeDiag] webgazer not available');
-                updateEyeStatus(false); showToast('眼动追踪库未加载，请使用触摸/鼠标');
+            if (!headTracking.checkAvailable()) {
+                console.error('MediaPipe not available');
+                updateHeadStatus(false); showToast('头部检测库未加载，请使用触摸/鼠标');
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                console.error('[EyeDiag] getUserMedia not supported');
-                updateEyeStatus(false); showToast('当前浏览器不支持摄像头，请使用触摸/鼠标');
+                console.error('getUserMedia not supported');
+                updateHeadStatus(false); showToast('当前浏览器不支持摄像头，请使用触摸/鼠标');
                 setTimeout(() => { overlay.classList.add('hidden'); }, 2000); return;
             }
-            console.log('[EyeDiag] calling eyeTracking.init()...');
-            eyeTracking.init();
-            console.log('[EyeDiag] eyeTracking.init() done, initialized=' + eyeTracking.initialized);
+            headTracking.init();
         }
 
         function resizeCanvas() { game.canvas.width = window.innerWidth; game.canvas.height = window.innerHeight; game.groundY = game.canvas.height * CONFIG.GROUND_HEIGHT_RATIO; }
@@ -1057,7 +991,7 @@
 
             document.getElementById('allowCameraBtn').addEventListener('click', async () => {
                 showPermState('loading');
-                const result = await eyeTracking.start();
+                const result = await headTracking.start();
                 if (!result.success) {
                     showPermState('error');
                     permErrorText.textContent = result.error;
@@ -1077,7 +1011,7 @@
                 updateControlToggle();
             });
             document.getElementById('cancelCameraBtn').addEventListener('click', () => {
-                eyeTracking.stop();
+                headTracking.stop();
                 showPermState('initial');
             });
             document.getElementById('retryCameraBtn').addEventListener('click', () => {
@@ -1085,33 +1019,27 @@
                 setTimeout(() => document.getElementById('allowCameraBtn').click(), 50);
             });
             document.getElementById('denyCameraBtn').addEventListener('click', () => {
-                eyeTracking.pause(); permOverlay.classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
+                headTracking.pause(); permOverlay.classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
             });
             document.getElementById('controlToggle').addEventListener('click', async () => {
-                if (eyeTracking.ready && eyeTracking.active) {
-                    eyeTracking.pause();
-                } else if (eyeTracking.initialized) {
-                    if (eyeTracking.isCalibrating) {
+                if (headTracking.ready && headTracking.active) {
+                    headTracking.pause();
+                } else if (headTracking.initialized) {
+                    if (headTracking.isCalibrating) {
                         showToast('当前正在校准，请完成后再切换');
                         return;
                     }
-                    if (eyeTracking.calibrationPositions && eyeTracking.calibrationPositions.length > 0) {
-                        eyeTracking.resume();
-                    } else {
-                        showToast('正在启动眼动并校准...');
-                        const result = await eyeTracking.start();
-                        if (!result || !result.success) showToast('眼动启动失败，请检查摄像头权限');
-                    }
+                    headTracking.resume();
                 } else {
-                    if (eyeTracking.checkAvailable()) {
-                        showToast('正在初始化眼动...');
-                        const result = await eyeTracking.start();
-                        if (!result || !result.success) showToast('眼动启动失败，请检查摄像头权限');
-                    } else { showToast('当前环境不支持眼动追踪'); }
+                    if (headTracking.checkAvailable()) {
+                        showToast('正在初始化头部控制...');
+                        const result = await headTracking.start();
+                        if (!result || !result.success) showToast('头部控制启动失败，请检查摄像头权限');
+                    } else { showToast('当前环境不支持头部控制'); }
                 }
             });
             document.getElementById('recalibrateBtn').addEventListener('click', () => {
-                eyeTracking.recalibrate();
+                headTracking.recalibrate();
             });
         }
 
@@ -1119,14 +1047,10 @@
             game.canvas.addEventListener('mousemove', (e) => { input.mouseX = e.clientX; input.mouseY = e.clientY; input.hasMouse = true; });
             game.canvas.addEventListener('mouseleave', () => { input.hasMouse = false; });
             game.canvas.addEventListener('touchstart', (e) => {
-                if (eyeTracking.ready && eyeTracking.active) eyeTracking.suppress(150);
                 input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY;
             }, { passive: false });
             game.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY; }, { passive: false });
             game.canvas.addEventListener('touchend', () => { input.hasTouch = false; });
-            game.canvas.addEventListener('mousedown', (e) => {
-                // desktop mouse does not suppress eye tracking
-            });
         }
 
         function startGame() {
@@ -1137,8 +1061,8 @@
             document.getElementById('mainMenu').classList.add('hidden'); document.getElementById('hud').style.display = 'flex';
             updateUI();
             const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || isMobile();
-            const controlMode = eyeTracking.ready && eyeTracking.active ? '眼动' : (isTouchDevice ? '触摸' : '鼠标');
-            if (isTouchDevice && !eyeTracking.ready) {
+            const controlMode = headTracking.ready && headTracking.active ? '头部' : (isTouchDevice ? '触摸' : '鼠标');
+            if (isTouchDevice && !headTracking.ready) {
                 showToast('游戏开始！手机推荐触摸控制');
             } else {
                 showToast(`游戏开始！使用${controlMode}瞄准，自动攻击`);
@@ -1253,6 +1177,6 @@
         <div class="calibration-pause-hint" id="calibrationPauseHint">游戏已暂停，校准完成后自动恢复</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-eye-auto-calib-3pt-v4</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-head-yaw-v5</div>
 </body>
 </html>
