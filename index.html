@@ -188,8 +188,9 @@
         const headTracking = {
             initialized: false, active: false, ready: false,
             yaw: 0, smoothYaw: 0, neutralYaw: 0,
-            history: [], historySize: 8,
-            isCalibrating: false, calibrationSamples: [],
+            pitch: 0, smoothPitch: 0, neutralPitch: 0,
+            history: [], historyPitch: [], historySize: 8,
+            isCalibrating: false, calibrationSamples: [], calibrationSamplesPitch: [],
             faceMesh: null, camera: null, videoElement: null,
             checkAvailable() { return typeof FaceMesh !== 'undefined' && typeof Camera !== 'undefined'; },
             init() {
@@ -219,16 +220,20 @@
                 if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                     const lm = results.multiFaceLandmarks[0];
                     const nose = lm[1];
+                    const brow = lm[10];
                     const leftCheek = lm[234];
                     const rightCheek = lm[454];
                     const faceCenterX = (leftCheek.x + rightCheek.x) / 2;
                     const faceWidth = Math.hypot(rightCheek.x - leftCheek.x, rightCheek.y - leftCheek.y);
                     const rawYaw = faceWidth > 0 ? (nose.x - faceCenterX) / faceWidth : 0;
+                    const rawPitch = faceWidth > 0 ? (nose.y - brow.y) / faceWidth : 0;
                     this.yaw = rawYaw;
+                    this.pitch = rawPitch;
                     this.active = true;
                     updateHeadStatus(true);
                     if (this.isCalibrating) {
                         this.calibrationSamples.push(rawYaw);
+                        this.calibrationSamplesPitch.push(rawPitch);
                     }
                 }
             },
@@ -297,10 +302,16 @@
                 } else {
                     this.neutralYaw = 0;
                 }
+                if (this.calibrationSamplesPitch.length > 0) {
+                    const sortedP = this.calibrationSamplesPitch.slice().sort((a,b) => a - b);
+                    this.neutralPitch = sortedP[Math.floor(sortedP.length / 2)];
+                } else {
+                    this.neutralPitch = 0;
+                }
                 this.ready = true;
                 updateHeadStatus(true); updateControlToggle();
-                showToast('头部控制已就绪！左右转头即可瞄准');
-                console.log('Head calibration finished, neutralYaw=', this.neutralYaw);
+                showToast('头部控制已就绪！左右转头瞄准，抬头击碎飞行道具');
+                console.log('Head calibration finished, neutralYaw=', this.neutralYaw, 'neutralPitch=', this.neutralPitch);
             },
             recalibrate() {
                 if (!this.initialized) { showToast('头部引擎未初始化'); return; }
@@ -332,17 +343,27 @@
             },
             update() {
                 if (this.active) {
-                    const diff = this.yaw - this.smoothYaw;
-                    const t = Math.abs(diff) < 0.03 ? 0.35 : 0.22;
-                    this.smoothYaw += diff * t;
+                    const diffYaw = this.yaw - this.smoothYaw;
+                    const tYaw = Math.abs(diffYaw) < 0.03 ? 0.35 : 0.22;
+                    this.smoothYaw += diffYaw * tYaw;
                     this.history.push(this.smoothYaw);
                     if (this.history.length > this.historySize) this.history.shift();
+                    const diffPitch = this.pitch - this.smoothPitch;
+                    const tPitch = Math.abs(diffPitch) < 0.03 ? 0.35 : 0.22;
+                    this.smoothPitch += diffPitch * tPitch;
+                    this.historyPitch.push(this.smoothPitch);
+                    if (this.historyPitch.length > this.historySize) this.historyPitch.shift();
                 }
             },
             getSmoothedDeltaYaw() {
                 if (this.history.length === 0) return this.smoothYaw - this.neutralYaw;
                 const avg = this.history.reduce((a,b) => a + b, 0) / this.history.length;
                 return avg - this.neutralYaw;
+            },
+            getSmoothedDeltaPitch() {
+                if (this.historyPitch.length === 0) return this.smoothPitch - this.neutralPitch;
+                const avg = this.historyPitch.reduce((a,b) => a + b, 0) / this.historyPitch.length;
+                return avg - this.neutralPitch;
             }
         };
 
@@ -504,12 +525,13 @@
                 if (this.lifetime > 50) {
                     const bounds = camera.getWorldBounds();
                     for (const e of game.entities) {
-                        if (e instanceof Enemy && e.state !== 'die' && !this.hitEnemies.has(e)) {
+                        if ((e instanceof Enemy || e instanceof Boss) && e.state !== 'die' && !this.hitEnemies.has(e)) {
                             const dy = Math.abs(e.position.y - this.position.y);
                             if (dy < this.width / 2 + e.radius) {
                                 const inBeam = this.direction === 'left' ? e.position.x <= this.position.x : e.position.x >= this.position.x;
                                 if (inBeam && e.position.x >= bounds.left - 50 && e.position.x <= bounds.right + 50) {
-                                    e.takeDamage(CONFIG.TRANSFORM_DAMAGE); this.hitEnemies.add(e);
+                                    const knockback = e instanceof Boss ? 0.5 : (e.type === 'melee' ? 0.8 : 1.2);
+                                    e.takeDamage(CONFIG.TRANSFORM_DAMAGE, knockback); this.hitEnemies.add(e);
                                     if (game.player) game.player.gainEnergy(CONFIG.ENERGY_PER_HIT * 0.5);
                                     for (let i = 0; i < 8; i++) game.particles.push(new Particle(e.position.x, e.position.y, '#ff4444', 350));
                                 }
@@ -555,18 +577,20 @@
                 super(x, y, 6); this.target = target; this.isBoss = isBoss;
                 this.speed = isBoss ? 4 : 3; this.damage = isBoss ? 15 : 8;
                 this.arcY = 0; this.flightTime = 0; this.heightArc = isBoss ? 70 : 45;
+                this.lockedTarget = target ? new Vector2(target.position.x, target.position.y) : null;
             }
             update(deltaTime) {
-                if (!this.target || this.target.health <= 0) { this.markedForDeletion = true; return; }
-                const dir = this.target.position.sub(this.position).normalize();
+                if (!this.lockedTarget) { this.markedForDeletion = true; return; }
+                const dir = this.lockedTarget.sub(this.position).normalize();
                 this.velocity = dir.mult(this.speed);
                 super.update(deltaTime);
                 this.flightTime += deltaTime;
                 const progress = Math.min(this.flightTime / 500, 1);
                 this.arcY = Math.sin(progress * Math.PI) * this.heightArc;
-                if (this.position.dist(this.target.position) < this.target.radius + this.radius + 8) {
-                    this.target.takeDamage(this.damage); this.markedForDeletion = true;
-                    for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.target.position.x, this.target.position.y, '#ff3333', 250));
+                if (this.position.dist(this.lockedTarget) < this.radius + this.radius + 8) {
+                    if (this.target && this.target.health > 0) this.target.takeDamage(this.damage);
+                    this.markedForDeletion = true;
+                    for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#ff3333', 250));
                 }
             }
             draw(ctx) {
@@ -630,7 +654,7 @@
                     game.entities.push(new Projectile(this.position.x, this.position.y - 15, player, false));
                 }
             }
-            takeDamage(amount) {
+            takeDamage(amount, knockbackForce = null) {
                 this.health -= amount;
                 for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*30, this.position.y + (Math.random()-0.5)*30, '#ffaa00', 250));
                 if (this.health <= 0) {
@@ -639,7 +663,11 @@
                 } else {
                     this.state = 'hit';
                     const player = game.entities.find(e => e instanceof Player);
-                    if (player) { const knockDir = this.position.sub(player.position).normalize(); this.velocity = knockDir.mult(2); }
+                    if (player) {
+                        const knockDir = this.position.sub(player.position).normalize();
+                        const force = knockbackForce !== null ? knockbackForce : (this.type === 'melee' ? 0.6 : 1.0);
+                        this.velocity = knockDir.mult(force);
+                    }
                 }
             }
             draw(ctx) {
@@ -703,7 +731,7 @@
                 } else { this.velocity = new Vector2(0, 0); }
                 this.position.y = game.groundY - this.radius;
             }
-            takeDamage(amount) {
+            takeDamage(amount, knockbackForce = null) {
                 this.health -= amount;
                 for (let i = 0; i < 8; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*50, this.position.y + (Math.random()-0.5)*40, '#ffaa00', 300));
                 if (this.health <= this.nextKnockbackHealth && this.state !== 'knockback' && this.state !== 'stun') {
@@ -711,6 +739,11 @@
                     this.triggerKnockback();
                 }
                 if (this.health <= 0) { this.state = 'die'; game.score += 2000; showToast('🎉 Boss 被击败！'); }
+                else if (knockbackForce !== null && this.state !== 'knockback' && this.state !== 'stun') {
+                    this.state = 'hit';
+                    const player = game.entities.find(e => e instanceof Player);
+                    if (player) { const knockDir = this.position.sub(player.position).normalize(); this.velocity = knockDir.mult(knockbackForce); }
+                }
             }
             triggerKnockback() {
                 this.state = 'knockback'; const player = game.entities.find(e => e instanceof Player);
@@ -838,9 +871,27 @@
                     const { enemy, drop, projs } = this.findInteractablesOnRay();
                     let laserEnd = null; let fired = false;
                     if (projs.length > 0) {
-                        for (const p of projs) { p.markedForDeletion = true; for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 250)); }
-                        const farProj = projs.reduce((a, b) => this.position.dist(a.position) > this.position.dist(b.position) ? a : b);
-                        laserEnd = new Vector2(farProj.position.x, farProj.position.y - farProj.arcY); fired = true;
+                        const deltaYaw = headTracking.getSmoothedDeltaYaw();
+                        const deltaPitch = headTracking.getSmoothedDeltaPitch();
+                        let destroyedCount = 0;
+                        for (const p of projs) {
+                            let canDestroy = true;
+                            if (headTracking.ready && headTracking.active) {
+                                const isLeft = p.position.x < this.position.x;
+                                const headTurned = isLeft ? (deltaYaw > 0.06) : (deltaYaw < -0.06);
+                                const headUp = deltaPitch < -0.08;
+                                canDestroy = headTurned && headUp;
+                            }
+                            if (canDestroy) {
+                                p.markedForDeletion = true; destroyedCount++;
+                                for (let i = 0; i < 4; i++) game.particles.push(new Particle(p.position.x, p.position.y - p.arcY, '#fbbf24', 250));
+                            }
+                        }
+                        if (destroyedCount > 0) {
+                            const destroyedProjs = projs.filter(p => p.markedForDeletion);
+                            const farProj = destroyedProjs.reduce((a, b) => this.position.dist(a.position) > this.position.dist(b.position) ? a : b);
+                            laserEnd = new Vector2(farProj.position.x, farProj.position.y - farProj.arcY); fired = true;
+                        }
                     }
                     if (drop) {
                         drop.markedForDeletion = true; this.health = Math.min(this.maxHealth, this.health + 25); this.happyTimer = 1800;
@@ -1183,6 +1234,6 @@
         <div class="calibration-pause-hint" id="calibrationPauseHint">游戏已暂停，校准完成后自动恢复</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-head-yaw-v5</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-head-pitch-v6</div>
 </body>
 </html>
