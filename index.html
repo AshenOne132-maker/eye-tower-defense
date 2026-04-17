@@ -143,7 +143,8 @@
             canvas: null, ctx: null, state: GameState.MENU,
             score: 0, wave: 1, entities: [], particles: [],
             lastTime: 0, enemySpawnTimer: 0, waveTimer: 0,
-            player: null, groundY: 0, bossSpawnedThisWave: false
+            player: null, groundY: 0, bossSpawnedThisWave: false,
+            isPaused: false
         };
 
         const camera = {
@@ -249,6 +250,8 @@
             startCalibration() {
                 if (this.isCalibrating) return;
                 if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
+                game.isPaused = true;
+                document.getElementById('pauseBadge').classList.add('show');
                 this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 2;
                 this.calibrationPositions = [
                     {x: 15, y: 15}, {x: 50, y: 15}, {x: 85, y: 15},
@@ -326,6 +329,8 @@
             },
             finishCalibration() {
                 this.isCalibrating = false;
+                game.isPaused = false;
+                document.getElementById('pauseBadge').classList.remove('show');
                 document.getElementById('calibrationOverlay').classList.add('hidden');
                 if (typeof webgazer !== 'undefined') {
                     try {
@@ -344,8 +349,20 @@
             recalibrate() {
                 if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
                 this.ready = false;
-                showToast('开始重新校准...');
+                showToast('开始重新校准，游戏已暂停');
                 setTimeout(() => { this.startCalibration(); }, 400);
+            },
+            pause() {
+                this.ready = false; this.active = false;
+                updateEyeStatus(false); updateControlToggle();
+                showToast('已手动切换为触摸/鼠标');
+            },
+            resume() {
+                if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
+                if (this.isCalibrating) { showToast('请先完成校准'); return; }
+                this.ready = true; this.active = true;
+                updateEyeStatus(true); updateControlToggle();
+                showToast('已恢复眼动控制');
             },
             stop() {
                 if (typeof webgazer !== 'undefined') webgazer.end();
@@ -394,22 +411,45 @@
                 input.mode = 'eye';
                 if (game.state === GameState.PLAYING && game.player) {
                     const gaze = eyeTracking.getSmoothedGaze();
-                    let worldPos = camera.screenToWorld(gaze.x, gaze.y);
+                    const screenW = window.innerWidth; const screenH = window.innerHeight;
+                    const gazeRatioX = gaze.x / screenW; const gazeRatioY = gaze.y / screenH;
                     const enemies = game.entities.filter(e => (e instanceof Enemy || e instanceof Boss) && e.state !== 'die');
-                    let nearestEnemy = null; let nearestDist = Infinity;
-                    for (const e of enemies) {
-                        const d = Math.hypot(e.position.x - worldPos.x, e.position.y - worldPos.y);
-                        if (d < nearestDist) { nearestDist = d; nearestEnemy = e; }
+                    let targetX = game.player.position.x;
+                    let targetY = game.player.position.y;
+                    const bounds = camera.getWorldBounds();
+                    let chosenEnemy = null;
+                    const STICKY_RADIUS = 120;
+                    let candidateEnemies = [];
+                    if (gazeRatioX < 0.42) {
+                        candidateEnemies = enemies.filter(e => e.position.x < game.player.position.x).sort((a,b) => a.position.x - b.position.x);
+                    } else if (gazeRatioX > 0.58) {
+                        candidateEnemies = enemies.filter(e => e.position.x > game.player.position.x).sort((a,b) => b.position.x - a.position.x);
+                    } else {
+                        candidateEnemies = enemies.slice().sort((a,b) => Math.abs(a.position.x - game.player.position.x) - Math.abs(b.position.x - game.player.position.x));
                     }
-                    const SNAP_RADIUS = 70;
-                    const SNAP_STRENGTH = 0.25;
-                    if (nearestEnemy && nearestDist < SNAP_RADIUS) {
-                        worldPos.x += (nearestEnemy.position.x - worldPos.x) * SNAP_STRENGTH;
-                        worldPos.y += (nearestEnemy.position.y - worldPos.y) * SNAP_STRENGTH;
+                    if (game.player.lastLockedEnemy && candidateEnemies.includes(game.player.lastLockedEnemy)) {
+                        const d = Math.hypot(game.player.lastLockedEnemy.position.x - game.player.position.x, game.player.lastLockedEnemy.position.y - game.player.position.y);
+                        if (d < STICKY_RADIUS) chosenEnemy = game.player.lastLockedEnemy;
                     }
-                    if (typeof game.player.eyeAimX !== 'number') { game.player.eyeAimX = worldPos.x; game.player.eyeAimY = worldPos.y; }
-                    game.player.eyeAimX += (worldPos.x - game.player.eyeAimX) * 0.18;
-                    game.player.eyeAimY += (worldPos.y - game.player.eyeAimY) * 0.18;
+                    if (!chosenEnemy && candidateEnemies.length > 0) chosenEnemy = candidateEnemies[0];
+                    if (chosenEnemy) {
+                        targetX = chosenEnemy.position.x; targetY = chosenEnemy.position.y;
+                        game.player.lastLockedEnemy = chosenEnemy;
+                    } else {
+                        game.player.lastLockedEnemy = null;
+                        if (gazeRatioX < 0.42) targetX = bounds.left + 60;
+                        else if (gazeRatioX > 0.58) targetX = bounds.right - 60;
+                    }
+                    let pitchOffset = 0;
+                    if (gazeRatioY < 0.35) pitchOffset = -0.38;
+                    else if (gazeRatioY > 0.65) pitchOffset = 0.21;
+                    const baseAngle = Math.atan2(targetY - game.player.position.y, targetX - game.player.position.x);
+                    const finalAngle = baseAngle + pitchOffset;
+                    const finalX = game.player.position.x + Math.cos(finalAngle) * 400;
+                    const finalY = game.player.position.y + Math.sin(finalAngle) * 400;
+                    if (typeof game.player.eyeAimX !== 'number') { game.player.eyeAimX = finalX; game.player.eyeAimY = finalY; }
+                    game.player.eyeAimX += (finalX - game.player.eyeAimX) * 0.32;
+                    game.player.eyeAimY += (finalY - game.player.eyeAimY) * 0.32;
                     game.player.aimAt(game.player.eyeAimX, game.player.eyeAimY);
                 }
             } else if (input.hasTouch) {
@@ -1048,16 +1088,28 @@
                 setTimeout(() => document.getElementById('allowCameraBtn').click(), 50);
             });
             document.getElementById('denyCameraBtn').addEventListener('click', () => {
-                eyeTracking.stop(); document.getElementById('permissionOverlay').classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
+                eyeTracking.pause(); permOverlay.classList.add('hidden'); showToast('已切换到触摸/鼠标控制');
             });
             document.getElementById('controlToggle').addEventListener('click', async () => {
                 if (eyeTracking.ready && eyeTracking.active) {
-                    eyeTracking.stop(); showToast('已手动切换为触摸/鼠标');
+                    eyeTracking.pause();
+                } else if (eyeTracking.initialized) {
+                    if (eyeTracking.isCalibrating) {
+                        showToast('当前正在校准，请完成后再切换');
+                        return;
+                    }
+                    if (eyeTracking.calibrationPositions && eyeTracking.calibrationPositions.length > 0) {
+                        eyeTracking.resume();
+                    } else {
+                        showToast('正在启动眼动并校准...');
+                        const result = await eyeTracking.start();
+                        if (!result || !result.success) showToast('眼动启动失败，请检查摄像头权限');
+                    }
                 } else {
                     if (eyeTracking.checkAvailable()) {
-                        showToast('正在尝试启动眼动...');
-                        const ok = await eyeTracking.start();
-                        if (!ok) showToast('眼动启动失败，请检查摄像头权限');
+                        showToast('正在初始化眼动...');
+                        const result = await eyeTracking.start();
+                        if (!result || !result.success) showToast('眼动启动失败，请检查摄像头权限');
                     } else { showToast('当前环境不支持眼动追踪'); }
                 }
             });
@@ -1120,7 +1172,7 @@
 
         function gameLoop(timestamp) {
             const deltaTime = timestamp - game.lastTime; game.lastTime = timestamp; updateInput();
-            if (game.state === GameState.PLAYING) { update(deltaTime); render(); updateUI(); }
+            if (game.state === GameState.PLAYING) { if (!game.isPaused) update(deltaTime); render(); updateUI(); }
             else if (game.state === GameState.MENU) { renderMenuBackground(); }
             requestAnimationFrame(gameLoop);
         }
@@ -1195,6 +1247,7 @@
     <div id="calibrationOverlay" class="calibration-overlay hidden">
         <div class="calibration-title">眼动校准</div>
         <div class="calibration-instruction" id="calibrationInstruction">请用眼睛注视屏幕上的圆点，并用手指点击它</div>
+        <div class="calibration-pause-hint" id="calibrationPauseHint">游戏已暂停，校准完成后自动恢复</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
     <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-eye-aim-9pt-v3</div>
