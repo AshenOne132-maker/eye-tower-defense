@@ -133,7 +133,7 @@
             MAX_ENERGY: 100,
             TRANSFORM_DRAIN: 35,
             TRANSFORM_DAMAGE: 40,
-            BOSS_SPAWN_WAVE: 5,
+            BOSS_SPAWN_WAVE: 2,
             BOSS_HEALTH: 400,
             BOSS_KNOCKBACK_THRESHOLD: 100
         };
@@ -1151,7 +1151,7 @@
             } else { game.enemySpawnTimer = 0; }
             if (game.wave >= CONFIG.BOSS_SPAWN_WAVE && !game.bossSpawnedThisWave) { game.bossSpawnedThisWave = true; spawnBoss(); }
             game.waveTimer += deltaTime;
-            if (game.waveTimer > 30000) { game.wave++; game.waveTimer = 0; game.bossSpawnedThisWave = false; showToast(`第 ${game.wave} 波来袭！`); }
+            if (game.waveTimer > 20000) { game.wave++; game.waveTimer = 0; game.bossSpawnedThisWave = false; showToast(`第 ${game.wave} 波来袭！`); }
             game.entities.forEach(e => e.update(deltaTime)); game.particles.forEach(p => p.update(deltaTime));
             game.entities = game.entities.filter(e => !e.markedForDeletion); game.particles = game.particles.filter(p => !p.markedForDeletion);
             if (game.player) camera.update(game.player);
