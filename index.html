@@ -251,7 +251,6 @@
                 if (this.isCalibrating) return;
                 if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
                 game.isPaused = true;
-                document.getElementById('pauseBadge').classList.add('show');
                 this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 2;
                 this.calibrationPositions = [
                     {x: 15, y: 15}, {x: 50, y: 15}, {x: 85, y: 15},
@@ -330,7 +329,6 @@
             finishCalibration() {
                 this.isCalibrating = false;
                 game.isPaused = false;
-                document.getElementById('pauseBadge').classList.remove('show');
                 document.getElementById('calibrationOverlay').classList.add('hidden');
                 if (typeof webgazer !== 'undefined') {
                     try {
