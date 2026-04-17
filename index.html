@@ -255,7 +255,7 @@
                 if (this.isCalibrating) return;
                 if (typeof webgazer !== 'undefined' && webgazer.clearData) { webgazer.clearData(); }
                 game.isPaused = true;
-                this.isCalibrating = true; this.calibrationIndex = 0; this.clicksOnCurrentPoint = 0; this.clicksPerPoint = 2;
+                this.isCalibrating = true; this.calibrationIndex = 0;
                 this.calibrationPositions = [
                     {x: 20, y: 50}, {x: 50, y: 50}, {x: 80, y: 50}
                 ];
@@ -291,8 +291,7 @@
                 }
                 const pos = this.calibrationPositions[this.calibrationIndex];
                 this.createCalibrationPoint(pos.x, pos.y);
-                const remaining = this.calibrationPositions.length - this.calibrationIndex;
-                document.getElementById('calibrationInstruction').textContent = '请注视圆点并点击（第 ' + (this.calibrationIndex + 1) + '/' + this.calibrationPositions.length + ' 个）';
+                document.getElementById('calibrationInstruction').textContent = '请用眼睛注视圆点，自动记录中（' + (this.calibrationIndex + 1) + '/' + this.calibrationPositions.length + '）';
             },
             createCalibrationPoint(x, y) {
                 const old = document.getElementById('currentCalibrationPoint');
@@ -304,26 +303,30 @@
                 point.className = 'calibration-point';
                 point.style.left = screenX + 'px';
                 point.style.top = screenY + 'px';
-                const handler = (e) => {
-                    e.preventDefault();
-                    this.clicksOnCurrentPoint++;
-                    if (this.clicksOnCurrentPoint >= this.clicksPerPoint) {
-                        point.classList.add('completed');
-                        setTimeout(() => {
-                            point.remove();
-                            this.calibrationIndex++;
-                            this.showNextCalibrationPoint();
-                        }, 200);
-                    } else {
-                        point.classList.remove('completed');
-                        void point.offsetWidth;
-                        point.classList.add('pulse-beat');
-                        setTimeout(() => point.classList.remove('pulse-beat'), 150);
-                    }
-                };
-                point.addEventListener('click', handler);
-                point.addEventListener('touchstart', handler, {passive: false});
+                const countLabel = document.createElement('div');
+                countLabel.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:14px;font-weight:bold;pointer-events:none;';
+                countLabel.textContent = '2';
+                point.appendChild(countLabel);
                 document.getElementById('calibrationOverlay').appendChild(point);
+                let count = 2;
+                const countdownTimer = setInterval(() => {
+                    count--;
+                    if (count >= 0) countLabel.textContent = count > 0 ? String(count) : '';
+                }, 1000);
+                setTimeout(() => {
+                    const sampleTimer = setInterval(() => {
+                        if (typeof webgazer !== 'undefined' && webgazer.recordScreenPosition) {
+                            webgazer.recordScreenPosition(screenX, screenY, 'click');
+                        }
+                    }, 200);
+                    setTimeout(() => {
+                        clearInterval(sampleTimer);
+                        clearInterval(countdownTimer);
+                        point.remove();
+                        this.calibrationIndex++;
+                        this.showNextCalibrationPoint();
+                    }, 1600);
+                }, 500);
             },
             finishCalibration() {
                 this.isCalibrating = false;
@@ -345,7 +348,9 @@
             },
             recalibrate() {
                 if (!this.initialized) { showToast('眼动引擎未初始化'); return; }
-                showToast('当前使用默认眼动模型，无需校准');
+                this.ready = false;
+                showToast('开始重新校准，游戏已暂停');
+                setTimeout(() => { this.startCalibration(); }, 400);
             },
             pause() {
                 this.ready = false; this.active = false;
@@ -1120,7 +1125,7 @@
             game.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); input.hasTouch = true; input.touchX = e.touches[0].clientX; input.touchY = e.touches[0].clientY; }, { passive: false });
             game.canvas.addEventListener('touchend', () => { input.hasTouch = false; });
             game.canvas.addEventListener('mousedown', (e) => {
-                if (eyeTracking.ready && eyeTracking.active) eyeTracking.suppress(150);
+                // desktop mouse does not suppress eye tracking
             });
         }
 
@@ -1248,6 +1253,6 @@
         <div class="calibration-pause-hint" id="calibrationPauseHint">游戏已暂停，校准完成后自动恢复</div>
         <div class="calibration-progress" id="calibrationProgress"></div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-eye-aim-9pt-v3</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-eye-auto-calib-3pt-v4</div>
 </body>
 </html>
