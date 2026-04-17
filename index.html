@@ -535,7 +535,7 @@
                             if (dy < this.width / 2 + e.radius) {
                                 const inBeam = this.direction === 'left' ? e.position.x <= this.position.x : e.position.x >= this.position.x;
                                 if (inBeam && e.position.x >= bounds.left - 50 && e.position.x <= bounds.right + 50) {
-                                    const knockback = e instanceof Boss ? 0.5 : (e.type === 'melee' ? 0.8 : 1.2);
+                                    const knockback = e instanceof Boss ? 0.2 : (e.type === 'melee' ? 0.8 : 1.2);
                                     e.takeDamage(CONFIG.TRANSFORM_DAMAGE, knockback); this.hitEnemies.add(e);
                                     if (game.player) game.player.gainEnergy(CONFIG.ENERGY_PER_HIT * 0.5);
                                     for (let i = 0; i < 8; i++) game.particles.push(new Particle(e.position.x, e.position.y, '#ff4444', 350));
@@ -715,43 +715,73 @@
         class Boss extends Entity {
             constructor(x, y) {
                 super(x, y, 42); this.maxHealth = CONFIG.BOSS_HEALTH; this.health = this.maxHealth;
-                this.speed = 0.55; this.attackRangeMelee = 55; this.damageMelee = 18; this.damageRange = 12;
+                this.speed = 0.55; this.baseSpeed = 0.55; this.attackRangeMelee = 55; this.damageMelee = 18; this.damageRange = 12;
                 this.state = 'chase'; this.animFrame = 0; this.deathTimer = 0; this.stunTimer = 0;
                 this.projectileTimer = 0; this.meleeCooldown = 0; this.dashTimer = 0;
                 this.nextKnockbackHealth = this.maxHealth - CONFIG.BOSS_KNOCKBACK_THRESHOLD;
                 this.color = '#8B4513'; this.facingRight = true;
+                this.shield = 0; this.maxShield = 300; this.shieldTimer = 0; this.shieldCooldown = 0;
+                this.summonTimer = 0; this.berserk = false; this.superArmorTimer = 0;
             }
             update(deltaTime) {
                 super.update(deltaTime); this.animFrame += deltaTime * 0.004;
                 if (this.state === 'die') return;
                 if (this.state === 'stun') { this.stunTimer -= deltaTime; if (this.stunTimer <= 0) this.state = 'chase'; return; }
-                if (this.state === 'knockback') { this.velocity = this.velocity.mult(0.88); if (this.velocity.mag() < 0.3) { this.state = 'stun'; this.stunTimer = 2200; } this.clampToScreen(); this.position.y = game.groundY - this.radius; return; }
+                if (this.state === 'knockback') { this.velocity = this.velocity.mult(0.88); if (this.velocity.mag() < 0.3) { this.state = 'chase'; this.superArmorTimer = 3000; } this.clampToScreen(); this.position.y = game.groundY - this.radius; return; }
                 if (this.state === 'dash') { this.dashTimer -= deltaTime; if (this.dashTimer <= 0) { this.state = 'chase'; this.velocity = new Vector2(0, 0); } this.position.y = game.groundY - this.radius; return; }
+
+                this.shieldTimer -= deltaTime; this.shieldCooldown -= deltaTime; this.summonTimer -= deltaTime; this.superArmorTimer -= deltaTime;
+                if (this.shield <= 0 && this.shieldCooldown <= 0) {
+                    this.shield = this.maxShield; this.shieldTimer = 5000; this.shieldCooldown = 8000;
+                }
+                if (this.shieldTimer <= 0 && this.shield > 0) { this.shield = 0; }
+                if (!this.berserk && this.health <= this.maxHealth * 0.5) {
+                    this.berserk = true; this.speed = this.baseSpeed * 1.4; showToast('👹 Boss 狂暴了！');
+                    for (let i = 0; i < 20; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#ff0000', 500));
+                }
+                if (this.summonTimer <= 0) {
+                    this.summonTimer = 6000;
+                    game.entities.push(new Enemy(-50, game.groundY - 25, 'melee'));
+                    game.entities.push(new Enemy(game.canvas.width + 50, game.groundY - 20, 'ranged'));
+                }
 
                 const player = game.entities.find(e => e instanceof Player); if (!player) return;
                 const dist = this.position.dist(player.position);
                 this.facingRight = player.position.x >= this.position.x;
+                let projCd = this.berserk ? 1600 : 2500;
+                let meleeCd = this.berserk ? 1200 : 1800;
                 this.projectileTimer -= deltaTime; this.meleeCooldown -= deltaTime;
 
                 if (dist <= this.attackRangeMelee && this.meleeCooldown <= 0) {
-                    this.meleeCooldown = 1800; this.state = 'dash'; this.dashTimer = 350;
+                    this.meleeCooldown = meleeCd; this.state = 'dash'; this.dashTimer = 350;
                     const dashDir = player.position.sub(this.position).normalize(); this.velocity = dashDir.mult(5.5);
                     setTimeout(() => { if (this.state !== 'die' && player && this.position.dist(player.position) < this.radius + player.radius + 10) player.takeDamage(this.damageMelee); }, 220);
                 } else if (dist > this.attackRangeMelee) {
                     this.state = 'chase'; const dir = player.position.sub(this.position).normalize(); this.velocity = dir.mult(this.speed);
-                    if (this.projectileTimer <= 0) { this.projectileTimer = 2500; game.entities.push(new Projectile(this.position.x, this.position.y - 25, player, true)); }
+                    if (this.projectileTimer <= 0) { this.projectileTimer = projCd; game.entities.push(new Projectile(this.position.x, this.position.y - 25, player, true)); }
                 } else { this.velocity = new Vector2(0, 0); }
                 this.position.y = game.groundY - this.radius;
             }
             takeDamage(amount, knockbackForce = null) {
-                this.health -= amount;
+                if (this.shield > 0) {
+                    this.shield -= amount;
+                    for (let i = 0; i < 5; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*60, this.position.y + (Math.random()-0.5)*40, '#60a5fa', 300));
+                    if (this.shield <= 0) {
+                        this.shield = 0; this.shieldTimer = 0;
+                        showToast('💥 Boss 护盾破碎！弱点暴露！');
+                        for (let i = 0; i < 15; i++) game.particles.push(new Particle(this.position.x, this.position.y, '#3b82f6', 500));
+                    }
+                    return;
+                }
+                const actual = amount * 1.3;
+                this.health -= actual;
                 for (let i = 0; i < 8; i++) game.particles.push(new Particle(this.position.x + (Math.random()-0.5)*50, this.position.y + (Math.random()-0.5)*40, '#ffaa00', 300));
                 if (this.health <= this.nextKnockbackHealth && this.state !== 'knockback' && this.state !== 'stun') {
                     this.nextKnockbackHealth -= CONFIG.BOSS_KNOCKBACK_THRESHOLD;
                     this.triggerKnockback();
                 }
                 if (this.health <= 0) { this.state = 'die'; game.score += 2000; showToast('🎉 Boss 被击败！'); }
-                else if (knockbackForce !== null && this.state !== 'knockback' && this.state !== 'stun') {
+                else if (knockbackForce !== null && this.superArmorTimer <= 0 && this.state !== 'knockback' && this.state !== 'stun') {
                     this.state = 'hit';
                     const player = game.entities.find(e => e instanceof Player);
                     if (player) { const knockDir = this.position.sub(player.position).normalize(); this.velocity = knockDir.mult(knockbackForce); }
@@ -776,20 +806,30 @@
                     ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI*2); ctx.fill(); ctx.restore(); return;
                 }
                 ctx.save(); ctx.translate(this.position.x, this.position.y);
+                if (this.shield > 0) {
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius + 10, 0, Math.PI*2);
+                    ctx.strokeStyle = 'rgba(59,130,246,0.6)'; ctx.lineWidth = 4; ctx.stroke();
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius + 14, 0, Math.PI*2);
+                    ctx.strokeStyle = 'rgba(96,165,250,0.3)'; ctx.lineWidth = 2; ctx.stroke();
+                }
+                if (this.berserk) {
+                    ctx.fillStyle = `rgba(239,68,68,${0.15 + Math.sin(Date.now()/100)*0.1})`;
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius + 18, 0, Math.PI*2); ctx.fill();
+                }
                 const bob = (this.state === 'chase' || this.state === 'dash') ? Math.sin(this.animFrame * 6) * 2 : 0;
                 ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, this.radius * 0.6 - bob, this.radius * 0.9, this.radius * 0.3, 0, 0, Math.PI * 2); ctx.fill();
                 ctx.translate(0, -bob);
                 const grad = ctx.createRadialGradient(-8, -8, 0, 0, 0, this.radius);
-                grad.addColorStop(0, '#A0522D'); grad.addColorStop(1, '#5D4037'); ctx.fillStyle = grad;
+                grad.addColorStop(0, this.berserk ? '#B71C1C' : '#A0522D'); grad.addColorStop(1, this.berserk ? '#5D1010' : '#5D4037'); ctx.fillStyle = grad;
                 ctx.beginPath(); ctx.roundRect(-this.radius, -this.radius * 0.9, this.radius * 2, this.radius * 1.8, 14); ctx.fill();
                 ctx.strokeStyle = '#3E2723'; ctx.lineWidth = 3; ctx.stroke();
                 // 耳朵
-                ctx.fillStyle = '#5D4037'; ctx.beginPath(); ctx.moveTo(-25, -30); ctx.lineTo(-35, -55); ctx.lineTo(-12, -35); ctx.fill(); ctx.beginPath(); ctx.moveTo(25, -30); ctx.lineTo(35, -55); ctx.lineTo(12, -35); ctx.fill();
+                ctx.fillStyle = this.berserk ? '#7f1d1d' : '#5D4037'; ctx.beginPath(); ctx.moveTo(-25, -30); ctx.lineTo(-35, -55); ctx.lineTo(-12, -35); ctx.fill(); ctx.beginPath(); ctx.moveTo(25, -30); ctx.lineTo(35, -55); ctx.lineTo(12, -35); ctx.fill();
                 // 眼睛
                 let eyeColor, pupilColor, eyeY;
                 if (this.state === 'stun') { eyeColor = '#90a4ae'; pupilColor = '#37474f'; eyeY = 2; }
                 else if (this.state === 'knockback') { eyeColor = '#cfd8dc'; pupilColor = '#b71c1c'; eyeY = 1; }
-                else { eyeColor = '#ffeb3b'; pupilColor = '#000000'; eyeY = -2; }
+                else { eyeColor = this.berserk ? '#ff5252' : '#ffeb3b'; pupilColor = '#000000'; eyeY = -2; }
                 ctx.fillStyle = eyeColor; ctx.beginPath(); ctx.ellipse(-14, eyeY, 9, 7, 0, 0, Math.PI*2); ctx.ellipse(14, eyeY, 9, 7, 0, 0, Math.PI*2); ctx.fill();
                 if (this.state === 'knockback') {
                     ctx.strokeStyle = pupilColor; ctx.lineWidth = 2;
@@ -825,6 +865,10 @@
                 ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-30, -this.radius - 14, 60, 6);
                 ctx.fillStyle = this.health > this.maxHealth * 0.5 ? '#4ade80' : this.health > this.maxHealth * 0.25 ? '#fbbf24' : '#ef4444';
                 ctx.fillRect(-30, -this.radius - 14, 60 * (this.health / this.maxHealth), 6);
+                if (this.shield > 0) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-30, -this.radius - 22, 60, 4);
+                    ctx.fillStyle = '#60a5fa'; ctx.fillRect(-30, -this.radius - 22, 60 * (this.shield / this.maxShield), 4);
+                }
                 ctx.restore();
             }
         }
@@ -1189,11 +1233,9 @@
         }
 
         function update(deltaTime) {
-            if (!hasBossAlive()) {
-                game.enemySpawnTimer += deltaTime;
-                const spawnRate = Math.max(600, CONFIG.ENEMY_SPAWN_RATE - game.wave * 120);
-                if (game.enemySpawnTimer > spawnRate) { spawnEnemy(); game.enemySpawnTimer = 0; }
-            } else { game.enemySpawnTimer = 0; }
+            game.enemySpawnTimer += deltaTime;
+            const spawnRate = Math.max(600, CONFIG.ENEMY_SPAWN_RATE - game.wave * 120);
+            if (game.enemySpawnTimer > spawnRate) { spawnEnemy(); game.enemySpawnTimer = 0; }
             if (game.wave >= CONFIG.BOSS_SPAWN_WAVE && !game.bossSpawnedThisWave) { game.bossSpawnedThisWave = true; spawnBoss(); }
             game.waveTimer += deltaTime;
             if (game.waveTimer > 20000) { game.wave++; game.waveTimer = 0; game.bossSpawnedThisWave = false; showToast(`第 ${game.wave} 波来袭！`); }
@@ -1266,6 +1308,6 @@
         <div class="orientation-title">请使用竖屏游玩</div>
         <div class="orientation-text" id="orientationText">请将设备旋转为竖屏方向，以获得最佳游戏体验。</div>
     </div>
-    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-head-arc-v7</div>
+    <div id="versionBadge" style="position:fixed;bottom:6px;right:10px;color:rgba(255,255,255,0.35);font-size:10px;z-index:9999;pointer-events:none;">Build: 2026-04-17-boss-shield-v8</div>
 </body>
 </html>
